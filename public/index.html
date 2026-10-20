@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ExpenseAgent</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231f7a5a'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>E</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>ExpenseAgent</h1>
+    <span id="today" class="muted"></span>
+  </header>
+
+  <main class="layout">
+    <section class="card chat" aria-label="Chat">
+      <div id="log" class="log" aria-live="polite">
+        <p class="hint">Type what you spent, like <code>coffee 200, vegs 400</code> or <code>uber 85 yesterday</code>. You can also ask <code>how am I doing this month?</code></p>
+      </div>
+      <form id="chat-form" class="composer" autocomplete="off">
+        <input id="msg" name="message" placeholder="coffee 200, vegs 400" maxlength="2000" required aria-label="Message">
+        <button type="submit" id="send">Send</button>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="budget-h">
+      <div class="card-head">
+        <h2 id="budget-h">Budget</h2>
+        <input type="month" id="month" aria-label="Month">
+      </div>
+      <div class="table-wrap">
+        <table id="budget" class="grid">
+          <thead><tr><th>Category</th><th class="num">Budget</th><th class="num">Spent</th><th class="num"><span class="hide-sm">Remaining</span><span class="show-sm">Left</span></th><th class="num hide-sm">Prev month</th><th class="num"><span class="hide-sm">% Used</span><span class="show-sm">%</span></th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p id="budget-note" class="muted small"></p>
+    </section>
+
+    <section class="card" aria-labelledby="recent-h">
+      <div class="card-head"><h2 id="recent-h">Recent expenses</h2></div>
+      <div class="table-wrap">
+        <table id="recent" class="grid">
+          <thead><tr><th>Date</th><th>Item</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="recent-empty" class="muted small" hidden>No expenses yet.</p>
+    </section>
+  </main>
+
+  <template id="tpl-edit">
+    <tr class="editing">
+      <td><input type="date" name="date" required></td>
+      <td><input name="note" maxlength="200" required></td>
+      <td><select name="category"></select></td>
+      <td class="num"><input name="amount" type="number" min="0.01" step="0.01" required></td>
+      <td class="actions"><button type="button" data-act="save">Save</button><button type="button" data-act="cancel" class="ghost">Cancel</button></td>
+    </tr>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

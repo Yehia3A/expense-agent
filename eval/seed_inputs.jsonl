@@ -1,0 +1,8 @@
+{"input": "coffee 200, vegs 400", "expected": [{"amount": 200, "category": "food_dining", "date_token": "today", "note": "coffee"}, {"amount": 400, "category": "groceries", "date_token": "today", "note": "vegs"}]}
+{"input": "paid 400 for vegs", "expected": [{"amount": 400, "category": "groceries", "date_token": "today", "note": "vegs"}]}
+{"input": "uber 85 yesterday", "expected": [{"amount": 85, "category": "transport_fuel", "date_token": "yesterday", "note": "uber"}]}
+{"input": "squash court 350 last friday", "expected": [{"amount": 350, "category": "sports", "date_token": "weekday:fri", "note": "squash court"}]}
+{"input": "coffee", "expected": "clarify"}
+{"input": "what did I spend most on last month?", "expected": "query"}
+{"input": "set groceries to 6000", "expected": "set_budget"}
+{"input": "hello", "expected": "no_write"}

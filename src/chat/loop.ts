@@ -1,0 +1,186 @@
+import { z } from "zod";
+import { appConfig, type Env } from "../env";
+import { localDate } from "../lib/dates";
+import { ulid } from "../lib/ulid";
+import { callTool, toolJsonSchemas, type ToolOutcome } from "../tools/registry";
+import type { ExpenseRow, ToolContext } from "../tools/types";
+import { type ChatMessage, complete, LlmError, llmConfig } from "./llm";
+import { systemPrompt } from "./prompt";
+
+export const MAX_ITERATIONS = 6;
+export const DEADLINE_MS = 25_000;
+const MAX_TOOL_RESULT_CHARS = 8_000;
+
+export const ChatRequest = z.object({
+  message: z.string().trim().min(1).max(2000),
+  request_id: z.string().min(8).max(100).regex(/^[A-Za-z0-9_:-]+$/),
+  history: z
+    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(2000) }))
+    .max(10)
+    .default([]),
+});
+export type ChatRequest = z.infer<typeof ChatRequest>;
+
+export interface PendingConfirmation {
+  request_id: string;
+  items: { amount: number; currency: string; category: string; note: string; date_token: string; expense_date: string; reasons: string[] }[];
+}
+
+export interface ChatResponse {
+  request_id: string;
+  reply: string;
+  saved: ExpenseRow[];
+  status_lines: string[];
+  pending: PendingConfirmation | null;
+  /** True when any tool changed data, so the UI should refresh its tables. */
+  changed: boolean;
+  model: string | null;
+  replayed?: boolean;
+  error?: string;
+}
+
+const MUTATING = new Set(["add_expense", "update_expense", "delete_expense", "undo_request", "set_budget"]);
+
+export interface ChatDeps {
+  now?: () => Date;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * One /chat request: the LLM picks tools, code runs them. Every date, total and
+ * status line comes from code; the model only chooses and fills tools (plan 9).
+ */
+export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): Promise<ChatResponse> {
+  const now = deps.now ?? (() => new Date());
+  const started = Date.now();
+
+  // D12: a retry with the same request_id replays the stored response.
+  const prior = await env.DB.prepare(
+    "SELECT response FROM logs WHERE request_id = ? AND response IS NOT NULL ORDER BY ts DESC LIMIT 1",
+  )
+    .bind(req.request_id)
+    .first<{ response: string }>();
+  if (prior) return { ...(JSON.parse(prior.response) as ChatResponse), replayed: true };
+
+  const config = appConfig(env);
+  const ctx: ToolContext = { db: env.DB, now, config, requestId: req.request_id, source: "chat", lineCounter: { next: 0 } };
+  const out: ChatResponse = {
+    request_id: req.request_id,
+    reply: "",
+    saved: [],
+    status_lines: [],
+    pending: null,
+    changed: false,
+    model: null,
+  };
+  const toolLog: { name: string; args: unknown; ok: boolean }[] = [];
+  const results: unknown[] = [];
+
+  try {
+    const cfg = llmConfig(env);
+    out.model = `${cfg.provider}/${cfg.model}`;
+    const categories = (
+      await env.DB.prepare("SELECT key, display_name FROM categories WHERE is_active = 1 ORDER BY sort_order").all<{
+        key: string;
+        display_name: string;
+      }>()
+    ).results;
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemPrompt(localDate(now(), config.tz), categories, config.largeAmountThreshold) },
+      ...req.history,
+      { role: "user", content: req.message },
+    ];
+    const tools = toolJsonSchemas();
+    const deadline = AbortSignal.timeout(DEADLINE_MS);
+
+    for (let i = 0; ; i++) {
+      if (i >= MAX_ITERATIONS) {
+        out.reply = "Sorry, I couldn't finish that. Please try rephrasing.";
+        out.error = "iteration cap reached";
+        break;
+      }
+      const msg = await complete(cfg, messages, tools, { signal: deadline, fetchImpl: deps.fetchImpl });
+      if (!msg.tool_calls.length) {
+        out.reply = (msg.content ?? "").trim();
+        break;
+      }
+      messages.push({ role: "assistant", content: msg.content, tool_calls: msg.tool_calls });
+      for (const call of msg.tool_calls) {
+        let args: unknown;
+        let outcome: ToolOutcome;
+        try {
+          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+          outcome = await callTool(ctx, call.function.name, args);
+        } catch (e) {
+          if (!(e instanceof SyntaxError)) throw e;
+          args = call.function.arguments;
+          outcome = { ok: false, error: "arguments were not valid JSON" };
+        }
+        toolLog.push({ name: call.function.name, args, ok: outcome.ok });
+        results.push(outcome);
+        collect(out, call.function.name, outcome);
+        const content = JSON.stringify(outcome);
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: content.length > MAX_TOOL_RESULT_CHARS ? content.slice(0, MAX_TOOL_RESULT_CHARS) + "…(truncated)" : content,
+        });
+      }
+    }
+  } catch (e) {
+    if (!(e instanceof LlmError)) throw e;
+    out.error = e.message;
+    out.reply = out.saved.length
+      ? "Saved, but I couldn't finish replying."
+      : `Sorry, the assistant is unavailable right now (${e.message}). Nothing was saved.`;
+  }
+
+  if (!out.reply) out.reply = out.saved.length ? "Saved." : "OK.";
+
+  // Cache the response for replay unless it failed before changing anything,
+  // in which case a retry should simply try again.
+  const cacheable = !out.error || out.changed;
+  await env.DB.prepare(
+    `INSERT INTO logs (id, request_id, ts, user_text, path, model, tool_calls, results, latency_ms, error, response)
+     VALUES (?, ?, ?, ?, 'llm', ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      ulid(),
+      req.request_id,
+      new Date().toISOString(),
+      req.message,
+      out.model,
+      JSON.stringify(toolLog),
+      JSON.stringify(results),
+      Date.now() - started,
+      out.error ?? null,
+      cacheable ? JSON.stringify(out) : null,
+    )
+    .run();
+
+  return out;
+}
+
+function collect(out: ChatResponse, name: string, outcome: ToolOutcome) {
+  if (!outcome.ok) return;
+  if (MUTATING.has(name)) {
+    const r = outcome.result as { status?: string };
+    if (name !== "add_expense" || r.status === "saved") out.changed = true;
+  }
+  if (name !== "add_expense") return;
+  const r = outcome.result as
+    | { status: "saved"; saved: ExpenseRow[]; status_lines: string[] }
+    | { status: "needs_confirmation"; items: { amount: number; currency: string; category: string; note: string; expense_date: string; reasons: string[] }[] }
+    | { status: "error" };
+  if (r.status === "saved") {
+    out.saved.push(...r.saved);
+    out.status_lines.push(...r.status_lines);
+  } else if (r.status === "needs_confirmation") {
+    // The confirm click becomes its own request so its line_index values never
+    // collide with rows this chat request already saved (D11).
+    out.pending = {
+      request_id: `${out.request_id}:confirm`,
+      items: r.items.map((it) => ({ ...it, date_token: `date:${it.expense_date}` })),
+    };
+  }
+}

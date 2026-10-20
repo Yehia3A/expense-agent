@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { toolJsonSchemas } from "../src/tools/registry";
+
+describe("tool JSON schemas sent to the LLM (D16)", () => {
+  const schemas = toolJsonSchemas();
+
+  it("covers the Phase 1 tool list", () => {
+    expect(schemas.map((s) => s.name)).toEqual([
+      "add_expense",
+      "list_expenses",
+      "update_expense",
+      "delete_expense",
+      "undo_request",
+      "summarize",
+      "budget_status",
+      "set_budget",
+    ]);
+  });
+
+  it("are plain object schemas without $schema", () => {
+    for (const s of schemas) {
+      expect(s.parameters.type).toBe("object");
+      expect(s.parameters).not.toHaveProperty("$schema");
+      expect(s.description.length).toBeGreaterThan(20);
+    }
+  });
+
+  it("add_expense exposes the category enum and has no date field, only date_token", () => {
+    const add = schemas.find((s) => s.name === "add_expense")!.parameters as {
+      properties: { items: { items: { properties: Record<string, { enum?: string[] }>; required: string[] } } };
+    };
+    const item = add.properties.items.items;
+    expect(item.properties.category!.enum).toContain("food_dining");
+    expect(Object.keys(item.properties).sort()).toEqual(["amount", "category", "currency", "date_token", "note"]);
+    expect(item.required.sort()).toEqual(["amount", "category", "note"]);
+  });
+});

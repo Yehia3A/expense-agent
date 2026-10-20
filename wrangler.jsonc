@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "expense-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "compatibility_flags": ["nodejs_compat"],
+  // UI is served by the same Worker (Workers Static Assets), so /chat and /api
+  // are same-origin and need no CORS. See docs/DECISIONS.md (D8).
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/chat"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "expense_agent",
+      // Replace with the id printed by `npx wrangler d1 create expense_agent`.
+      // Local dev (`wrangler dev`) works with this placeholder.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "TIMEZONE": "Africa/Cairo",
+    "LLM_PROVIDER": "groq",
+    "LLM_MODEL": "openai/gpt-oss-120b",
+    "LARGE_AMOUNT_THRESHOLD": "5000",
+    "OLD_DATE_CONFIRM_DAYS": "60"
+  },
+  "observability": { "enabled": true }
+  // Secrets (never in this file): LLM_API_KEY, APP_TOKEN
+  //   npx wrangler secret put LLM_API_KEY
+  //   npx wrangler secret put APP_TOKEN
+  // For local dev put them in .dev.vars (gitignored).
+}
