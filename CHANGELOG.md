@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 (2026-10-20): Sign-in and look
+
+- Username + password sign-in with 30-day sliding sessions (HttpOnly cookie, hashed session ids), first-account setup with the APP_TOKEN as setup key, change password, sign out, sign-in rate limits.
+- New welcome screen with the sign-in card in the middle; browser password autofill.
+- In-page dialogs and toasts instead of the browser's confirm()/prompt().
+- Dark theme by default with a light/dark switch.
+
 ## 0.5.0 (2026-10-20): Phases 5–7
 
 - Regex fast path for plain `item amount` messages, plus a merchant cache (term → category) learned from saves and corrections, never from rows flagged for review. Covered messages skip the LLM entirely.

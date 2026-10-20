@@ -107,7 +107,7 @@ export async function loadReport() {
 
 export async function initReport() {
   select.addEventListener("change", () => loadReport());
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => last && render(last));
+  window.addEventListener("themechange", () => last && render(last));
 }
 
 export async function refreshReportMonths() {

@@ -27,6 +27,8 @@ flowchart TD
   T --> D[("D1 (SQLite)<br/>expenses · budgets · categories<br/>merchant_map · legacy totals · logs · rate_limits")]
 ```
 
+**Sign-in:** username and password with a 30-day session (browser autofill works); `APP_TOKEN` is the setup key for the first account and the Bearer token for scripts and MCP clients. Dark mode by default, with a light-mode switch in the header.
+
 **Rules that keep the numbers right:** the model never writes a date, a total or a percentage. It picks a tool and fills in amount, category, note and a relative `date_token` (`yesterday`, `weekday:fri`). Code turns that into a Cairo calendar date. Every number on screen comes from SQL. Large amounts and old dates wait for a Confirm click. Every write is idempotent on its request id, and undo works for a whole message.
 
 ## Status
@@ -61,7 +63,7 @@ npm run setup:cloudflare
 
 Then:
 
-1. Open `https://expense-agent.<your-subdomain>.workers.dev`, enter the `APP_TOKEN` once, and log a test expense.
+1. Open `https://expense-agent.<your-subdomain>.workers.dev` and create your account: a username, a password, and the `APP_TOKEN` as the one-time setup key. Let the browser save the password; you stay signed in for 30 days.
 2. Put **Cloudflare Access** in front (free, about 10 minutes): [docs/SECURITY.md](docs/SECURITY.md). Run its checklist before entering real data.
 3. Optional: push the repo to GitHub and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets. Every push to `main` then runs the tests and deploys (`.github/workflows/deploy.yml`).
 

@@ -1,3 +1,4 @@
+import { confirmDialog } from "./dialog.js";
 // Shared UI helpers. All text goes in via textContent, never innerHTML, so
 // nothing typed can inject markup.
 
@@ -44,27 +45,39 @@ const listeners = new Set();
 export const onDataChanged = (fn) => listeners.add(fn);
 export const dataChanged = () => listeners.forEach((fn) => fn());
 
-// ---------- errors ----------
-export function toast(message) {
+// ---------- notices ----------
+/** A short notice at the bottom of the screen: "error" (default) or "ok". */
+export function toast(message, kind = "error") {
   const box = $("#toast");
-  const item = el("div", { class: "toast-item", role: "status" }, message);
+  const item = el("div", { class: `toast-item ${kind}`, role: kind === "error" ? "alert" : "status" }, message);
   box.append(item);
-  setTimeout(() => item.remove(), 6000);
+  setTimeout(() => item.classList.add("leaving"), 5200);
+  setTimeout(() => item.remove(), 5600);
+}
+
+// ---------- theme ----------
+const THEME_KEY = "expenseagent.theme";
+export const currentTheme = () => document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+export function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* not remembered, still applied */ }
+  for (const b of document.querySelectorAll(".theme-toggle")) {
+    b.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+    b.setAttribute("title", theme === "dark" ? "Light mode" : "Dark mode");
+  }
+  window.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
+}
+export function wireThemeToggles() {
+  for (const b of document.querySelectorAll(".theme-toggle")) {
+    b.addEventListener("click", () => setTheme(currentTheme() === "dark" ? "light" : "dark"));
+  }
+  setTheme(currentTheme());
 }
 
 // ---------- API ----------
-const TOKEN_KEY = "expenseagent.token";
-let memToken = (() => {
-  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
-})();
-function setToken(t) {
-  memToken = t;
-  try { localStorage.setItem(TOKEN_KEY, t); } catch { /* private mode: token lives for this page only */ }
-}
-
+// The browser session is an HttpOnly cookie, sent automatically; a 401 means it ended.
 export async function api(path, { method = "GET", body, retry = true } = {}) {
   const headers = { "content-type": "application/json" };
-  if (memToken) headers.authorization = `Bearer ${memToken}`;
   let res;
   try {
     res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: "same-origin" });
@@ -74,12 +87,8 @@ export async function api(path, { method = "GET", body, retry = true } = {}) {
     throw new Error("Network error. Check your connection and try again.");
   }
   if (res.status === 401) {
-    const t = window.prompt("Enter your ExpenseAgent access token (or reload to sign in again):");
-    if (t) {
-      setToken(t.trim());
-      return api(path, { method, body, retry });
-    }
-    throw new Error("Not signed in.");
+    window.dispatchEvent(new CustomEvent("auth:required"));
+    throw new Error("Your session has ended. Please sign in again.");
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 429) throw new Error("Too many requests. Wait a minute and try again.");
@@ -106,9 +115,16 @@ export function expenseRow(r) {
   );
   edit.addEventListener("click", () => startEdit(tr, r));
   del.addEventListener("click", async () => {
-    if (!window.confirm(`Delete "${r.note} ${fmt(r.amount)}"?`)) return;
+    const ok = await confirmDialog({
+      title: "Delete this expense?",
+      message: `${r.note} · ${money(r.amount, r.currency)} · ${r.expense_date}. It will be removed from your totals.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api(`/api/expenses/${r.id}`, { method: "DELETE" });
+      toast(`Deleted ${r.note}.`, "ok");
       dataChanged();
     } catch (err) {
       toast(err.message);

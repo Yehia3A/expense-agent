@@ -3,6 +3,7 @@ import { ChatRequest, runChat } from "./chat/loop";
 import { appConfig, type Env, rateLimits } from "./env";
 import { ulid } from "./lib/ulid";
 import { handleMcp } from "./mcp/server";
+import { handleAuth } from "./security/account";
 import { authenticate } from "./security/auth";
 import { checkLimits, type Limit } from "./security/ratelimit";
 import { addExpenses, ItemInput, recentExpenses } from "./tools/expenses";
@@ -188,10 +189,27 @@ export async function handle(req: Request, env: Env, deps: HandlerDeps = {}): Pr
 
   const csrf = crossSiteWrite(req, url);
   if (csrf) return fail(403, csrf);
+  const now = deps.now?.().getTime() ?? Date.now();
 
-  const auth = await authenticate(req, env, { fetchImpl: deps.fetchImpl, now: deps.now?.().getTime() });
+  // Sign-in, sign-out and first-account setup work before authentication.
+  if (url.pathname.startsWith("/api/auth/")) {
+    try {
+      return (await handleAuth(req, env, url, now)) ?? fail(404, "not found");
+    } catch (e) {
+      console.error("auth error", e);
+      return fail(500, "internal error");
+    }
+  }
+
+  const auth = await authenticate(req, env, { fetchImpl: deps.fetchImpl, now });
   if (!auth.ok) return fail(auth.status, auth.error);
+  const res = await route(req, env, url, isChat, isMcp, deps);
+  // A session used after a day gets its 30 days back; send the refreshed cookie along.
+  if (auth.setCookie) res.headers.append("set-cookie", auth.setCookie);
+  return res;
+}
 
+async function route(req: Request, env: Env, url: URL, isChat: boolean, isMcp: boolean, deps: HandlerDeps): Promise<Response> {
   try {
     const lim = rateLimits(env);
     const limits: Limit[] = [{ bucket: "api:min", windowSec: 60, max: lim.apiPerMin }];

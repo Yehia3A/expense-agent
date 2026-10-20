@@ -1,0 +1,203 @@
+/* Welcome / sign-in screen, app header controls, dialogs and toasts.
+   Uses the theme tokens defined at the top of style.css. */
+
+/* =================== Shared controls =================== */
+body { min-height: 100vh; transition: background-color 0.2s ease; }
+input, select { background: var(--input-bg); }
+input:focus, select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+button:not(.ghost):not(.icon-btn):not(.icon-round):not(.pw-toggle):not(.user-btn):not([role="menuitem"]):hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+button.ghost:hover:not(:disabled) { background: var(--bar-bg); }
+button.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.btn-danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--bad); border-color: var(--bad); }
+.logo-mark { width: 34px; height: 34px; flex: none; }
+.logo-mark.sm { width: 28px; height: 28px; align-self: center; }
+
+.icon-round {
+  width: 38px; height: 38px; padding: 0; display: inline-grid; place-items: center;
+  background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+}
+.icon-round:hover { background: var(--bar-bg); }
+.icon-round svg, .menu svg, .features svg, .fine svg, .pw-toggle svg, .chev, .dialog-icon svg {
+  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.icon-round svg { width: 18px; height: 18px; }
+:root[data-theme="dark"] .i-moon { display: none; }
+:root[data-theme="light"] .i-sun { display: none; }
+
+/* Boot loader */
+.boot { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* =================== Welcome =================== */
+.welcome { position: relative; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; overflow: clip; isolation: isolate; }
+.welcome-glow {
+  position: absolute; inset: -20% -10% auto -10%; height: 120%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 18% 20%, var(--glow-1), transparent 70%),
+    radial-gradient(35% 30% at 85% 30%, var(--glow-2), transparent 70%),
+    radial-gradient(30% 30% at 60% 90%, var(--glow-1), transparent 70%);
+}
+.welcome::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0.35;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(70% 60% at 50% 40%, #000 20%, transparent 75%);
+  mask-image: radial-gradient(70% 60% at 50% 40%, #000 20%, transparent 75%);
+}
+.welcome-top { display: flex; justify-content: space-between; align-items: center; padding: 20px clamp(16px, 4vw, 48px); }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; letter-spacing: -0.01em; }
+.welcome-main {
+  flex: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: 8px clamp(16px, 4vw, 48px) 32px;
+  display: grid; gap: clamp(28px, 5vw, 64px); align-items: center;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 420px);
+}
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--accent-strong);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 5px 12px; border-radius: 999px;
+}
+.eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.hero { font-size: clamp(34px, 5.2vw, 58px); line-height: 1.05; letter-spacing: -0.03em; margin: 18px 0 16px; font-weight: 800; }
+.grad { background: linear-gradient(90deg, var(--accent-strong), #6aa8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+:root[data-theme="light"] .grad { background-image: linear-gradient(90deg, #1f7a5a, #2e64c8); }
+.lead { font-size: clamp(15px, 1.6vw, 17px); color: var(--muted); max-width: 54ch; line-height: 1.6; margin: 0 0 22px; }
+.lead code { color: var(--text); }
+
+.demo { display: grid; gap: 10px; max-width: 460px; margin-bottom: 26px; }
+.demo-msg { padding: 10px 14px; border-radius: 14px; font-size: 14px; border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow); }
+.demo-msg.you { justify-self: end; background: var(--user); border-color: transparent; border-bottom-right-radius: 4px; }
+.demo-msg.bot { justify-self: start; border-bottom-left-radius: 4px; min-width: 75%; }
+.demo-line { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+.chk { color: var(--ok); font-weight: 700; }
+.demo-bar { height: 6px; border-radius: 99px; background: var(--bar-bg); margin: 10px 0 6px; overflow: hidden; }
+.demo-bar span { display: block; height: 100%; width: 31%; border-radius: 99px; background: var(--ok); }
+.demo-cap { font-size: 12px; color: var(--muted); }
+
+.features { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.features li { display: flex; gap: 10px; align-items: flex-start; }
+.features svg { width: 22px; height: 22px; flex: none; color: var(--accent-strong); margin-top: 1px; }
+.features strong { display: block; font-size: 14px; }
+.features span { display: block; font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+.auth-card {
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 20px; padding: clamp(22px, 3vw, 32px);
+  box-shadow: var(--shadow);
+  animation: rise 0.45s ease both;
+}
+.auth-form { display: grid; gap: 14px; }
+.auth-form h2 { font-size: 24px; letter-spacing: -0.02em; margin: 0; }
+.auth-sub { margin: -8px 0 4px; color: var(--muted); font-size: 14px; }
+.field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.field input { width: 100%; padding: 11px 13px; border-radius: 10px; font-size: 15px; font-weight: 400; }
+.field small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { padding-right: 44px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; color: var(--muted); padding: 6px; border-radius: 8px; display: grid; place-items: center;
+}
+.pw-toggle:hover, .pw-toggle.on { color: var(--accent-strong); }
+.pw-toggle svg { width: 18px; height: 18px; }
+.form-error {
+  margin: 0; padding: 9px 12px; border-radius: 10px; font-size: 13px; color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
+}
+.btn-block { width: 100%; padding: 12px; border-radius: 10px; font-size: 15px; position: relative; }
+.btn-block.loading .btn-label { visibility: hidden; }
+.btn-block.loading::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-ink) 40%, transparent); border-top-color: var(--accent-ink);
+  animation: spin 0.7s linear infinite;
+}
+.fine { display: flex; align-items: center; gap: 6px; justify-content: center; margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.fine svg { width: 14px; height: 14px; }
+.welcome-foot { text-align: center; font-size: 12px; padding: 16px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.welcome-copy > * { animation: rise 0.5s ease both; }
+.welcome-copy > *:nth-child(2) { animation-delay: 0.05s; }
+.welcome-copy > *:nth-child(3) { animation-delay: 0.1s; }
+.welcome-copy > *:nth-child(4) { animation-delay: 0.15s; }
+.welcome-copy > *:nth-child(5) { animation-delay: 0.2s; }
+
+@media (max-width: 900px) {
+  .welcome-main { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+  .features { grid-template-columns: minmax(0, 1fr); }
+  .hero { margin-top: 8px; }
+  /* On phones the sign-in card comes right after the headline. */
+  .welcome-copy { display: contents; }
+  .welcome-copy .eyebrow { justify-self: start; }
+  .eyebrow { order: 1; } .hero { order: 2; } .auth-card { order: 3; } .lead { order: 4; } .demo { order: 5; } .features { order: 6; }
+  .welcome-main { gap: 16px; }
+}
+
+/* =================== App header =================== */
+.top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; }
+.top .tabs { justify-self: center; }
+.brand { align-items: center; gap: 10px; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.user { position: relative; }
+.user-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px;
+  background: var(--card); color: var(--text); border: 1px solid var(--line); font-weight: 600;
+}
+.user-btn:hover { background: var(--bar-bg); }
+.avatar {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #50d3a0, #217a5b);
+}
+.chev { width: 16px; height: 16px; color: var(--muted); }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 220px; padding: 6px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+  animation: rise 0.15s ease both;
+}
+.menu-head { padding: 8px 10px 10px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.menu-head strong { color: var(--text); }
+.menu button {
+  display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px;
+  background: transparent; border: none; color: var(--text); font-weight: 500; text-align: left;
+}
+.menu button:hover, .menu button:focus-visible { background: var(--bar-bg); }
+.menu button.danger { color: var(--bad); }
+.menu svg { width: 16px; height: 16px; }
+
+@media (max-width: 700px) {
+  .top { grid-template-columns: 1fr auto; }
+  .top .tabs { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
+  .top .tabs a { flex: 1; text-align: center; }
+  .brand h1 { font-size: 18px; }
+}
+
+/* =================== Dialog =================== */
+.dialog { padding: 0; border: none; background: transparent; color: var(--text); max-width: min(92vw, 420px); width: 100%; }
+.dialog::backdrop { background: var(--backdrop); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.dialog[open] { animation: pop 0.18s ease both; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.dialog-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 24px;
+  box-shadow: var(--shadow); display: grid; gap: 12px;
+}
+.dialog-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-strong); }
+.dialog-icon.danger { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.dialog-icon svg { width: 22px; height: 22px; }
+.dialog-title { font-size: 18px; margin: 4px 0 0; }
+.dialog-text { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.dialog-actions button { padding: 9px 16px; border-radius: 10px; }
+
+/* =================== Toasts =================== */
+.toast { z-index: 40; }
+.toast-item { display: flex; gap: 8px; align-items: center; animation: rise 0.2s ease both; transition: opacity 0.3s, transform 0.3s; }
+.toast-item.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.toast-item.leaving { opacity: 0; transform: translateY(6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

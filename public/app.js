@@ -1,8 +1,10 @@
-// ExpenseAgent UI entry: loads categories, routes between the Track, Report
-// and History views (#track, #report, #history) and refreshes whatever is
-// visible when data changes.
+// ExpenseAgent UI entry: checks the session, then shows either the welcome
+// screen (sign in / first account) or the app with its Track, Report and
+// History views (#track, #report, #history).
+import { getMe, showWelcome, signOut } from "./auth.js";
+import { changePasswordDialog } from "./dialog.js";
 import { initHistory, loadHistory } from "./history.js";
-import { $, api, cairoToday, onDataChanged, state, toast } from "./lib.js";
+import { $, api, cairoToday, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
 import { initReport, loadReport, refreshReportMonths } from "./report.js";
 import { focusChat, initTrack, loadTrack } from "./track.js";
 
@@ -38,13 +40,49 @@ async function show() {
   if (name === "track") focusChat();
 }
 
-onDataChanged(() => {
-  for (const v of Object.keys(VIEWS)) stale.add(v);
-  show();
-});
+function wireUserMenu(username) {
+  const btn = $("#user-btn");
+  const menu = $("#user-menu");
+  document.body.dataset.username = username;
+  $("#user-name").textContent = username;
+  $("#user-initial").textContent = username.slice(0, 1).toUpperCase();
+  $("#menu-username").textContent = username;
+  const close = () => {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  };
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+    if (open) menu.querySelector("button")?.focus();
+  });
+  document.addEventListener("click", (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !menu.hidden) {
+      close();
+      btn.focus();
+    }
+  });
+  $("#menu-password").addEventListener("click", () => {
+    close();
+    changePasswordDialog();
+  });
+  $("#menu-signout").addEventListener("click", () => {
+    close();
+    signOut();
+  });
+}
 
-async function boot() {
+async function startApp(me) {
+  $("#boot").hidden = true;
+  $("#welcome").hidden = true;
+  $("#app").hidden = false;
   $("#today").textContent = cairoToday();
+  wireUserMenu(me.username ?? "you");
   initTrack();
   initReport();
   initHistory();
@@ -54,8 +92,30 @@ async function boot() {
     toast(err.message);
     return;
   }
+  onDataChanged(() => {
+    for (const v of Object.keys(VIEWS)) stale.add(v);
+    show();
+  });
   window.addEventListener("hashchange", show);
   await show();
+}
+
+async function boot() {
+  wireThemeToggles();
+  let me;
+  try {
+    me = await getMe();
+  } catch (err) {
+    $("#boot-text").textContent = err.message;
+    return;
+  }
+  // Any API call that finds the session gone sends you back to the sign-in card.
+  window.addEventListener("auth:required", async () => {
+    const fresh = await getMe().catch(() => ({ authenticated: false }));
+    if (!fresh.authenticated) showWelcome(fresh, { message: "Your session has ended. Please sign in again." });
+  });
+  if (me.authenticated) await startApp(me);
+  else showWelcome(me);
 }
 
 boot();

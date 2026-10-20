@@ -6,8 +6,9 @@
 |---|---|---|
 | Cloudflare Access | Everything: UI, `/api`, `/chat` | Login wall at Cloudflare's edge. Only your email gets in. |
 | Access JWT check in the Worker | `/api`, `/chat` | Every request must carry a valid Access JWT (signature, issuer, audience, expiry). The raw `workers.dev` URL and any route Access doesn't cover are refused. `src/security/access.ts` |
-| `APP_TOKEN` (optional) | `/api`, `/chat` | `Authorization: Bearer` for scripts, or as a fallback without Access. Compared in constant time. |
-| Fail-closed default | `/api`, `/chat` | With neither Access nor `APP_TOKEN` configured, only `localhost` is served. A deployed Worker answers 503 instead of running open. |
+| Username + password | Browser | PBKDF2-SHA256 hashes, a 30-day sliding session in an HttpOnly, Secure, SameSite=Strict cookie, only the session's SHA-256 stored. Sign-in is rate-limited per IP. Changing the password signs out other devices. |
+| `APP_TOKEN` | `/api`, `/chat`, `/mcp` | `Authorization: Bearer` for scripts and MCP clients; also the one-time setup key for the first account. Compared in constant time. |
+| Fail-closed default | `/api`, `/chat` | With no Access, no `APP_TOKEN` and no account yet, only `localhost` is served. A deployed Worker answers 503 instead of running open. |
 | Rate limits | LLM quota, D1 | Global fixed windows in D1: `/chat` 20/min and 500/day, whole API 300/min (vars in `wrangler.jsonc`). 429 with `Retry-After`. |
 | CSRF guard | Writes | Cross-origin `Origin`, `Sec-Fetch-Site: cross-site` and non-JSON bodies are refused (403). No CORS headers are ever sent. |
 | Headers | UI and API | Strict CSP (`'self'` only, no inline script or style), `frame-ancestors 'none'`, `nosniff`, `no-referrer` (`public/_headers` and API responses). |
@@ -29,6 +30,16 @@
 7. `npm run deploy`.
 
 Keep `APP_TOKEN` set as well if you want to call the API from scripts or a future MCP client; otherwise it can be removed with `npx wrangler secret delete APP_TOKEN`.
+
+## Forgot your password?
+
+There is no email reset (there is no email). Delete the account; your expenses stay, only the login goes. Then open the app and create it again with the APP_TOKEN as setup key:
+
+```bash
+npx.cmd wrangler d1 execute expense_agent --remote --command "DELETE FROM sessions; DELETE FROM users;"
+```
+
+Forgot the APP_TOKEN too? Set a new one first with `npx.cmd wrangler secret put APP_TOKEN`.
 
 ## Manual checklist (run after every auth change)
 
