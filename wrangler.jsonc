@@ -17,7 +17,7 @@
       "database_name": "expense_agent",
       // Replace with the id printed by `npx wrangler d1 create expense_agent`.
       // Local dev (`wrangler dev`) works with this placeholder.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b79763b0-7866-4d93-8cee-2b51abad9594",
       "migrations_dir": "migrations"
     }
   ],
