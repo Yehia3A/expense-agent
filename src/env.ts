@@ -5,6 +5,10 @@ export interface Env {
   LLM_PROVIDER?: string;
   LLM_MODEL?: string;
   LLM_BASE_URL?: string;
+  /** Used for the rest of a request when the main model answers 429 (quota). */
+  LLM_FALLBACK_MODEL?: string;
+  /** "off" disables the regex + merchant-cache fast path (evals compare both). */
+  FAST_PATH?: string;
   LARGE_AMOUNT_THRESHOLD?: string;
   OLD_DATE_CONFIRM_DAYS?: string;
   // Cloudflare Access (Phase 3). Both must be set to enable JWT checks.

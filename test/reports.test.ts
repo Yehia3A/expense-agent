@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import legacyData from "../data/legacy_totals.json";
+import legacyData from "./fixtures/legacy.json";
 import { handle } from "../src/index";
 import { importLegacy, type LegacyData } from "../src/legacy";
 import { budgetStatus } from "../src/tools/budgets";
@@ -43,7 +43,7 @@ describe("monthly_report (plan 10.3)", () => {
       avg_per_day: 502.63,
       highest_day: { date: "2026-10-10", total: 7000 },
     });
-    expect(r.projection).toEqual({ projected_total: 15582, budget: 18650, projected_pct_of_budget: 83.5 });
+    expect(r.projection).toEqual({ projected_total: 15582, budget: 10000, projected_pct_of_budget: 155.8 });
   });
 
   it("daily series covers each elapsed day, with zeros, from transactions only", async () => {

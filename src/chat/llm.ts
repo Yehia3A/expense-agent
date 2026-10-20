@@ -48,9 +48,17 @@ export interface ToolSpec {
   parameters: Record<string, unknown>;
 }
 
+export interface Usage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  calls: number;
+}
+
 export interface CompletionOptions {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Accumulates token counts reported by the provider (for evals and cost estimates). */
+  usage?: Usage;
 }
 
 export async function complete(
@@ -93,7 +101,13 @@ export async function complete(
     }
     const json = (await res.json()) as {
       choices?: { message?: { content?: string | null; tool_calls?: ToolCall[] } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
+    if (opts.usage) {
+      opts.usage.calls += 1;
+      opts.usage.prompt_tokens += json.usage?.prompt_tokens ?? 0;
+      opts.usage.completion_tokens += json.usage?.completion_tokens ?? 0;
+    }
     const msg = json.choices?.[0]?.message;
     if (!msg) throw new LlmError("LLM response had no message");
     return { content: msg.content ?? null, tool_calls: msg.tool_calls ?? [] };

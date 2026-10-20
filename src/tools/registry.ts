@@ -41,10 +41,12 @@ export async function callTool(ctx: ToolContext, name: string, rawArgs: unknown)
   }
 }
 
-/** JSON Schema for each tool, generated from the zod input (D16). */
+let schemas: { name: string; description: string; parameters: Record<string, unknown> }[] | null = null;
+
+/** JSON Schema for each tool, generated from the zod input (D16). Built once per isolate. */
 export function toolJsonSchemas() {
-  return TOOLS.map((t) => {
+  return (schemas ??= TOOLS.map((t) => {
     const { $schema: _ignored, ...parameters } = z.toJSONSchema(t.input, { io: "input", unrepresentable: "any" }) as Record<string, unknown>;
     return { name: t.name, description: t.description, parameters };
-  });
+  }));
 }

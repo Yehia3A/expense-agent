@@ -24,7 +24,7 @@ export function makeCtx(opts: { now?: Date; requestId?: string; source?: Source 
   };
 }
 
-/** Back to the freshly migrated state (0001-0003): no expenses, logs or legacy totals; October budgets only. */
+/** A clean slate: no expenses, logs, legacy totals or learned merchants; October budgets with Other at a fixture 10,000. */
 export async function resetDb(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM expenses"),
@@ -37,7 +37,7 @@ export async function resetDb(): Promise<void> {
       `INSERT INTO budgets (category, month, amount) VALUES
         ('food_dining','2026-10',NULL), ('groceries','2026-10',NULL), ('transport_fuel','2026-10',NULL),
         ('bills_utilities','2026-10',NULL), ('entertainment','2026-10',NULL), ('shopping','2026-10',NULL),
-        ('sports','2026-10',NULL), ('other','2026-10',18650)`,
+        ('sports','2026-10',NULL), ('other','2026-10',10000)`,
     ),
   ]);
 }

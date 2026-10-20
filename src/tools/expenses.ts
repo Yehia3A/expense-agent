@@ -2,6 +2,7 @@ import { z } from "zod";
 import { addDays, checkExpenseDate, isValidYmd, monthOf, resolveDateToken } from "../lib/dates";
 import { ulid } from "../lib/ulid";
 import { BASE_CURRENCY, budgetStatus, type BudgetRow, statusLine } from "./budgets";
+import { learnStatements } from "./merchants";
 import { CategoryEnum, type CategoryKey, defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
 
 const DATE_TOKEN_HELP =
@@ -142,6 +143,8 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
       .bind(ctx.requestId, first, first + resolved.length)
       .all<ExpenseRow>()
   ).results;
+  const learn = learnStatements(ctx.db, saved, created);
+  if (learn.length) await ctx.db.batch(learn);
   return { status: "saved", request_id: ctx.requestId, saved, ...(await feedback(ctx, saved)) };
 }
 
@@ -226,6 +229,11 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
     .bind(next.amount, next.currency, next.category, next.note, next.expense_date, next.needs_review, id)
     .run();
   const updated = (await getRow(ctx.db, id))!;
+  // A category you pick by hand is the best label the merchant cache can get.
+  if (fields.category !== undefined || fields.note !== undefined) {
+    const learn = learnStatements(ctx.db, [updated], nowIso(ctx));
+    if (learn.length) await ctx.db.batch(learn);
+  }
   return { updated, before: row, ...(await feedback(ctx, [updated])) };
 }
 

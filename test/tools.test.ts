@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import legacyData from "../data/legacy_totals.json";
+import legacyData from "./fixtures/legacy.json";
 import { importLegacy, type LegacyData, legacyRows } from "../src/legacy";
 import { budgetStatus, ensureBudgets } from "../src/tools/budgets";
 import { addExpenses, deleteExpense, undoRequest, updateExpense } from "../src/tools/expenses";
@@ -238,7 +238,7 @@ describe("budgets", () => {
     await ensureBudgets(env.DB, "2026-12");
     const dec = await budgetStatus(env.DB, "2026-12");
     expect(dec.rows.find((r) => r.category === "groceries")!.budget).toBe(6000);
-    expect(dec.rows.find((r) => r.category === "other")!.budget).toBe(18650);
+    expect(dec.rows.find((r) => r.category === "other")!.budget).toBe(10000);
   });
 
   it("never copies backwards: months before the first budget month are untracked", async () => {
@@ -278,15 +278,15 @@ describe("budgets", () => {
     expect(food).toMatchObject({ budget: 500, spent: 600, remaining: -100, prev_spent: 300, pct_used: 120 });
     const shopping = s.rows.find((r) => r.category === "shopping")!;
     expect(shopping).toMatchObject({ budget: null, spent: 700, remaining: null, pct_used: null });
-    // Budgeted: food 500 + groceries 1000 + other 18650.
+    // Budgeted: food 500 + groceries 1000 + other 10000.
     expect(s.total).toEqual({
-      budget: 20150,
+      budget: 11500,
       spent: 1550,
       budgeted_spent: 850,
       unbudgeted_spent: 700,
-      remaining: 19300,
+      remaining: 10650,
       prev_spent: 300,
-      pct_used: 4.2,
+      pct_used: 7.4,
     });
     expect(s.total.spent).toBe(s.rows.reduce((sum, r) => sum + r.spent, 0));
     expect(s.rows.map((r) => r.category)).toEqual([

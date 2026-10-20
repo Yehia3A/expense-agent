@@ -11,7 +11,7 @@ INSERT INTO categories (key, display_name, sort_order) VALUES
 
 -- Starting budgets for October 2026. NULL = untracked until you set an amount
 -- (in the UI, or by chat: "set groceries to 6000"). Copy-forward fills later months.
--- Only 'Other' is known from the Excel sheet; Shopping has no budget there.
+-- Your own amounts live in data/personal.json (gitignored): npm run db:seed-personal:local
 INSERT INTO budgets (category, month, amount) VALUES
   ('food_dining',     '2026-10', NULL),
   ('groceries',       '2026-10', NULL),
@@ -20,4 +20,4 @@ INSERT INTO budgets (category, month, amount) VALUES
   ('entertainment',   '2026-10', NULL),
   ('shopping',        '2026-10', NULL),
   ('sports',          '2026-10', NULL),
-  ('other',           '2026-10', 12650);
+  ('other',           '2026-10', NULL);

@@ -1,0 +1,110 @@
+// Phase 5 eval driver. Runs eval/cases.json through the real /chat pipeline
+// (eval/run.eval.ts inside the Workers runtime), scores each run
+// (eval/score.mjs), saves the raw results and rewrites eval/RESULTS.md.
+//
+// Examples:
+//   node scripts/eval.mjs --mode fastpath                         (no LLM, no key needed)
+//   node scripts/eval.mjs --mock --mode llm,hybrid                (keyword mock LLM, checks the harness)
+//   node scripts/eval.mjs --mode llm,hybrid \
+//       --models groq:openai/gpt-oss-120b,groq:llama-3.3-70b-versatile,groq:qwen/qwen3-32b
+//   node scripts/eval.mjs --models groq:openai/gpt-oss-20b --cases a01,a05,r02 --delay 3000
+//
+// Keys: GROQ_API_KEY / OPENROUTER_API_KEY env vars, or LLM_API_KEY from .dev.vars.
+// Free tiers limit requests per minute and tokens per day; --delay (ms between
+// cases, default 2500) and --limit / --cases keep a run inside them.
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { markdownReport, summarize } from "../eval/score.mjs";
+
+const args = Object.fromEntries(
+  process.argv.slice(2).reduce((acc, a, i, all) => {
+    if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1] && !all[i + 1].startsWith("--") ? all[i + 1] : "true"]);
+    return acc;
+  }, []),
+);
+
+const BASE_URLS = { groq: "https://api.groq.com/openai/v1", openrouter: "https://openrouter.ai/api/v1", mock: "http://127.0.0.1:8788/v1" };
+const devVars = existsSync(".dev.vars")
+  ? Object.fromEntries(readFileSync(".dev.vars", "utf8").split(/\r?\n/).filter((l) => /^\w+=/.test(l)).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]))
+  : {};
+const keyFor = (provider) =>
+  provider === "mock" ? "mock" : process.env[`${provider.toUpperCase()}_API_KEY`] || process.env.LLM_API_KEY || devVars.LLM_API_KEY || "";
+
+const modes = (args.mode ?? "hybrid").split(",");
+let models = (args.models ?? "groq:openai/gpt-oss-120b").split(",");
+if (args.mock) models = ["mock:mock"];
+const { cases } = JSON.parse(readFileSync("eval/cases.json", "utf8"));
+
+let mock = null;
+if (args.mock) {
+  mock = spawn("node", ["scripts/mock-llm.mjs"], { stdio: "ignore" });
+  await new Promise((r) => setTimeout(r, 800));
+}
+
+const runs = [];
+const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+mkdirSync("eval/results", { recursive: true });
+
+for (const mode of modes) {
+  for (const spec of mode === "fastpath" ? ["none:fast-path-only"] : models) {
+    const [provider, ...rest] = spec.split(":");
+    const model = rest.join(":");
+    const key = mode === "fastpath" ? "unused" : keyFor(provider);
+    if (!key) {
+      console.error(`skip ${spec} (${mode}): no API key. Set ${provider.toUpperCase()}_API_KEY or LLM_API_KEY in .dev.vars.`);
+      continue;
+    }
+    console.log(`\n=== ${spec} | ${mode} ===`);
+    const r = spawnSync("npx", ["vitest", "run", "--config", "vitest.eval.config.ts", "--reporter", "dot"], {
+      shell: process.platform === "win32",
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      env: {
+        ...process.env,
+        EVAL_MODE: mode,
+        EVAL_DELAY_MS: String(args.delay ?? (provider === "mock" ? 0 : 2500)),
+        LLM_PROVIDER: provider === "none" ? "groq" : provider,
+        LLM_MODEL: model,
+        LLM_BASE_URL: BASE_URLS[provider] ?? "",
+        LLM_API_KEY: key,
+        ...(args.cases ? { EVAL_CASES: args.cases } : {}),
+        ...(args.limit ? { EVAL_LIMIT: args.limit } : {}),
+      },
+    });
+    const out = (r.stdout ?? "") + (r.stderr ?? "");
+    const observations = out
+      .split(/\r?\n/)
+      .filter((l) => l.includes("EVAL_CASE "))
+      .map((l) => JSON.parse(l.slice(l.indexOf("EVAL_CASE ") + 10)));
+    if (!observations.length) {
+      console.error("No results. vitest output:\n" + out.slice(-3000));
+      continue;
+    }
+    const metrics = summarize(cases, observations);
+    const run = { model: spec, mode, at: new Date().toISOString(), metrics, observations };
+    runs.push(run);
+    const file = `eval/results/${stamp}-${mode}-${spec.replace(/[^\w.-]+/g, "_")}.json`;
+    writeFileSync(file, JSON.stringify(run, null, 2));
+    console.log(JSON.stringify({ ...metrics, failures: `${metrics.failures.length} (see ${file})` }, null, 2));
+  }
+}
+mock?.kill();
+
+// RESULTS.md: the latest run for every (model, mode) pair seen so far.
+const latest = new Map();
+for (const f of readdirSync("eval/results").filter((f) => f.endsWith(".json")).sort()) {
+  const run = JSON.parse(readFileSync(`eval/results/${f}`, "utf8"));
+  if (!run.model.startsWith("mock")) latest.set(`${run.model}|${run.mode}`, { ...run, file: f });
+}
+const all = [...latest.values()];
+const failuresMd = all
+  .map((r) => `### ${r.model} (${r.mode})\n\n` + (r.metrics.failures.length ? r.metrics.failures.map((f) => `- \`${f.id}\` [${f.path}] ${f.why}`).join("\n") : "No failures.") + "\n")
+  .join("\n");
+writeFileSync(
+  "eval/RESULTS.md",
+  `# Eval results\n\nGenerated by \`node scripts/eval.mjs\`; latest run per model and mode. Targets (plan O2): at least 95% field accuracy and at most 1% false writes. ` +
+    `Modes: **llm** = every message goes to the model; **hybrid** = regex fast path + merchant cache first, model for the rest; **fastpath** = no model at all (shows what the fast path alone covers; deferred messages count as not handled).\n\n` +
+    markdownReport(all) +
+    `\nCorrect = every field right and no extra rows. Clarify = asked a question when the amount or item was missing. Needs LLM = messages that needed (or, in fastpath mode, would need) a model call. Tokens are as reported by the provider; on free tiers the cost is $0, the token count is what uses up the daily quota.\n\n## Failures\n\n${failuresMd}`,
+);
+console.log("\nWrote eval/RESULTS.md");

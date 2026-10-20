@@ -188,10 +188,11 @@ describe("/chat tool-calling loop", () => {
   it("LLM failure: clear error, nothing saved, and a retry calls the LLM again", async () => {
     const llm = scriptedLlm([{ status: 429 }]);
     const req = { message: "coffee 200", request_id: "req-chat-429", history: [] };
-    const res = await runChat(env, req, deps(llm));
+    const noFallback = { ...env, LLM_FALLBACK_MODEL: "" };
+    const res = await runChat(noFallback, req, deps(llm));
     expect(res.error).toMatch(/rate limit/);
     expect(res.reply).toMatch(/Nothing was saved/);
-    await runChat(env, req, deps(llm));
+    await runChat(noFallback, req, deps(llm));
     expect(llm.calls()).toBe(2);
   });
 

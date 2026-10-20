@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ChatRequest, runChat } from "./chat/loop";
 import { appConfig, type Env, rateLimits } from "./env";
 import { ulid } from "./lib/ulid";
+import { handleMcp } from "./mcp/server";
 import { authenticate } from "./security/auth";
 import { checkLimits, type Limit } from "./security/ratelimit";
 import { addExpenses, ItemInput, recentExpenses } from "./tools/expenses";
@@ -182,7 +183,8 @@ export interface HandlerDeps {
 export async function handle(req: Request, env: Env, deps: HandlerDeps = {}): Promise<Response> {
   const url = new URL(req.url);
   const isChat = url.pathname === "/chat";
-  if (!isChat && !url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
+  const isMcp = url.pathname === "/mcp";
+  if (!isChat && !isMcp && !url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
   const csrf = crossSiteWrite(req, url);
   if (csrf) return fail(403, csrf);
@@ -201,6 +203,7 @@ export async function handle(req: Request, env: Env, deps: HandlerDeps = {}): Pr
       return fail(429, "rate limit reached, try again later", { bucket: rl.bucket }, { "retry-after": String(rl.retryAfterSec) });
     }
 
+    if (isMcp) return await handleMcp(req, env, { now: deps.now });
     if (isChat) {
       if (req.method !== "POST") return fail(405, "method not allowed");
       const parsed = ChatRequest.safeParse(await body(req));

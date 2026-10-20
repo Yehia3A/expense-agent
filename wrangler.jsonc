@@ -9,7 +9,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/chat"]
+    "run_worker_first": ["/api/*", "/chat", "/mcp"]
   },
   "d1_databases": [
     {
@@ -25,6 +25,10 @@
     "TIMEZONE": "Africa/Cairo",
     "LLM_PROVIDER": "groq",
     "LLM_MODEL": "openai/gpt-oss-120b",
+    // Used for the rest of a request when the main model's free quota is used up (429).
+    "LLM_FALLBACK_MODEL": "llama-3.1-8b-instant",
+    // "off" sends every message to the LLM (the eval baseline).
+    "FAST_PATH": "on",
     "LARGE_AMOUNT_THRESHOLD": "5000",
     "OLD_DATE_CONFIRM_DAYS": "60",
     // Cloudflare Access (docs/SECURITY.md). Fill both to require an Access JWT.

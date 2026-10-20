@@ -2,9 +2,11 @@ import { z } from "zod";
 import { appConfig, type Env } from "../env";
 import { localDate } from "../lib/dates";
 import { ulid } from "../lib/ulid";
+import { addExpenses } from "../tools/expenses";
 import { callTool, toolJsonSchemas, type ToolOutcome } from "../tools/registry";
 import type { ExpenseRow, ToolContext } from "../tools/types";
-import { type ChatMessage, complete, LlmError, llmConfig } from "./llm";
+import { fastPath } from "./fastpath";
+import { type ChatMessage, complete, LlmError, llmConfig, type Usage } from "./llm";
 import { systemPrompt } from "./prompt";
 
 export const MAX_ITERATIONS = 6;
@@ -35,6 +37,9 @@ export interface ChatResponse {
   /** True when any tool changed data, so the UI should refresh its tables. */
   changed: boolean;
   model: string | null;
+  /** fast = regex + merchant cache, no LLM call (plan 7.2 paths A and C). */
+  path: "fast" | "llm";
+  usage?: Usage;
   replayed?: boolean;
   error?: string;
 }
@@ -72,67 +77,32 @@ export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): 
     pending: null,
     changed: false,
     model: null,
+    path: "llm",
   };
   const toolLog: { name: string; args: unknown; ok: boolean }[] = [];
   const results: unknown[] = [];
 
-  try {
-    const cfg = llmConfig(env);
-    out.model = `${cfg.provider}/${cfg.model}`;
-    const categories = (
-      await env.DB.prepare("SELECT key, display_name FROM categories WHERE is_active = 1 ORDER BY sort_order").all<{
-        key: string;
-        display_name: string;
-      }>()
-    ).results;
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt(localDate(now(), config.tz), categories, config.largeAmountThreshold) },
-      ...req.history,
-      { role: "user", content: req.message },
-    ];
-    const tools = toolJsonSchemas();
-    const deadline = AbortSignal.timeout(DEADLINE_MS);
-
-    for (let i = 0; ; i++) {
-      if (i >= MAX_ITERATIONS) {
-        out.reply = "Sorry, I couldn't finish that. Please try rephrasing.";
-        out.error = "iteration cap reached";
-        break;
-      }
-      const msg = await complete(cfg, messages, tools, { signal: deadline, fetchImpl: deps.fetchImpl });
-      if (!msg.tool_calls.length) {
-        out.reply = (msg.content ?? "").trim();
-        break;
-      }
-      messages.push({ role: "assistant", content: msg.content, tool_calls: msg.tool_calls });
-      for (const call of msg.tool_calls) {
-        let args: unknown;
-        let outcome: ToolOutcome;
-        try {
-          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-          outcome = await callTool(ctx, call.function.name, args);
-        } catch (e) {
-          if (!(e instanceof SyntaxError)) throw e;
-          args = call.function.arguments;
-          outcome = { ok: false, error: "arguments were not valid JSON" };
-        }
-        toolLog.push({ name: call.function.name, args, ok: outcome.ok });
-        results.push(outcome);
-        collect(out, call.function.name, outcome);
-        const content = JSON.stringify(outcome);
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: content.length > MAX_TOOL_RESULT_CHARS ? content.slice(0, MAX_TOOL_RESULT_CHARS) + "…(truncated)" : content,
-        });
-      }
+  // Paths A + C: a plain "item amount, ..." message whose items are all in the
+  // merchant cache is saved without calling the LLM.
+  const fast = env.FAST_PATH === "off" ? null : await fastPath(env.DB, req.message);
+  if (fast) {
+    out.path = "fast";
+    const r = await addExpenses(ctx, fast);
+    toolLog.push({ name: "add_expense", args: { items: fast }, ok: true });
+    results.push({ ok: true, result: r });
+    collect(out, "add_expense", { ok: true, result: r });
+    out.reply =
+      r.status === "saved" ? "Saved." : r.status === "needs_confirmation" ? "That needs confirmation: press Confirm to save it." : r.errors.join("; ");
+  } else {
+    try {
+      await runLlm(env, req, ctx, out, toolLog, results, deps.fetchImpl);
+    } catch (e) {
+      if (!(e instanceof LlmError)) throw e;
+      out.error = e.message;
+      out.reply = out.saved.length
+        ? "Saved, but I couldn't finish replying."
+        : `Sorry, the assistant is unavailable right now (${e.message}). Nothing was saved.`;
     }
-  } catch (e) {
-    if (!(e instanceof LlmError)) throw e;
-    out.error = e.message;
-    out.reply = out.saved.length
-      ? "Saved, but I couldn't finish replying."
-      : `Sorry, the assistant is unavailable right now (${e.message}). Nothing was saved.`;
   }
 
   if (!out.reply) out.reply = out.saved.length ? "Saved." : "OK.";
@@ -142,13 +112,14 @@ export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): 
   const cacheable = !out.error || out.changed;
   await env.DB.prepare(
     `INSERT INTO logs (id, request_id, ts, user_text, path, model, tool_calls, results, latency_ms, error, response)
-     VALUES (?, ?, ?, ?, 'llm', ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       ulid(),
       req.request_id,
       new Date().toISOString(),
       req.message,
+      out.path === "fast" ? "regex" : "llm",
       out.model,
       JSON.stringify(toolLog),
       JSON.stringify(results),
@@ -182,5 +153,83 @@ function collect(out: ChatResponse, name: string, outcome: ToolOutcome) {
       request_id: `${out.request_id}:confirm`,
       items: r.items.map((it) => ({ ...it, date_token: `date:${it.expense_date}` })),
     };
+  }
+}
+
+/** Path B: the model chooses tools, code runs them, until the model replies with text. */
+async function runLlm(
+  env: Env,
+  req: ChatRequest,
+  ctx: ToolContext,
+  out: ChatResponse,
+  toolLog: { name: string; args: unknown; ok: boolean }[],
+  results: unknown[],
+  fetchImpl?: typeof fetch,
+) {
+  let cfg = llmConfig(env);
+  const fallback = env.LLM_FALLBACK_MODEL;
+  out.model = `${cfg.provider}/${cfg.model}`;
+  const usage: Usage = { prompt_tokens: 0, completion_tokens: 0, calls: 0 };
+  out.usage = usage;
+
+  // R2: when the main model's free quota runs out, switch to the fallback for the rest of this request.
+  const ask = async (messages: ChatMessage[], signal: AbortSignal) => {
+    try {
+      return await complete(cfg, messages, tools, { signal, fetchImpl, usage });
+    } catch (e) {
+      if (!(e instanceof LlmError && e.status === 429 && fallback && fallback !== cfg.model)) throw e;
+      cfg = { ...cfg, model: fallback };
+      out.model = `${cfg.provider}/${cfg.model}`;
+      return complete(cfg, messages, tools, { signal, fetchImpl, usage });
+    }
+  };
+
+  const categories = (
+    await env.DB.prepare("SELECT key, display_name FROM categories WHERE is_active = 1 ORDER BY sort_order").all<{
+      key: string;
+      display_name: string;
+    }>()
+  ).results;
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, ctx.config.largeAmountThreshold) },
+    ...req.history,
+    { role: "user", content: req.message },
+  ];
+  const tools = toolJsonSchemas();
+  const deadline = AbortSignal.timeout(DEADLINE_MS);
+
+  for (let i = 0; ; i++) {
+    if (i >= MAX_ITERATIONS) {
+      out.reply = "Sorry, I couldn't finish that. Please try rephrasing.";
+      out.error = "iteration cap reached";
+      return;
+    }
+    const msg = await ask(messages, deadline);
+    if (!msg.tool_calls.length) {
+      out.reply = (msg.content ?? "").trim();
+      return;
+    }
+    messages.push({ role: "assistant", content: msg.content, tool_calls: msg.tool_calls });
+    for (const call of msg.tool_calls) {
+      let args: unknown;
+      let outcome: ToolOutcome;
+      try {
+        args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        outcome = await callTool(ctx, call.function.name, args);
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        args = call.function.arguments;
+        outcome = { ok: false, error: "arguments were not valid JSON" };
+      }
+      toolLog.push({ name: call.function.name, args, ok: outcome.ok });
+      results.push(outcome);
+      collect(out, call.function.name, outcome);
+      const content = JSON.stringify(outcome);
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: content.length > MAX_TOOL_RESULT_CHARS ? content.slice(0, MAX_TOOL_RESULT_CHARS) + "…(truncated)" : content,
+      });
+    }
   }
 }

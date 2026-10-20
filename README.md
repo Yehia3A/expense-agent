@@ -1,37 +1,73 @@
 # ExpenseAgent
 
-A personal expense tracker you talk to. Type `coffee 200, vegs 400`; it records both items with today's date (Cairo time), files them under the right categories, and shows how much of each budget you've used. Built on Cloudflare Workers + D1 with free-tier LLM tool calling.
+A personal expense tracker you talk to. Type `coffee 200, vegs 400`; it records both items with today's date (Cairo time), files them under the right categories, and shows how much of each budget you've used. Monthly reports and a 12-month history replace the Excel sheets. The same tools are available to any MCP client, such as Claude Desktop or Claude Code.
 
-Project plan: Notion page "Intelligent expenses tracker". Decisions made along the way: [docs/DECISIONS.md](docs/DECISIONS.md).
+Runs entirely on Cloudflare's free plan (Workers + D1 + Access) with a free Groq model: **$0 a month, nothing running on your laptop.**
+
+## Architecture
+
+```mermaid
+flowchart TD
+  B["Browser UI<br/>Track · Report · History"] -->|same origin| A
+  M["MCP clients<br/>Claude Desktop / Code, scripts"] -->|"/mcp"| A
+  A["Cloudflare Access<br/>login wall"] --> W
+  subgraph W["Worker (src/index.ts)"]
+    G["Auth: Access JWT or APP_TOKEN<br/>CSRF guard · rate limits"]
+    G --> C["/chat"]
+    G --> P["/api/*"]
+    G --> X["/mcp<br/>JSON-RPC, stateless"]
+    C --> F{"Fast path?<br/>regex + merchant cache"}
+    F -->|"yes (no LLM)"| T
+    F -->|no| L["LLM tool-calling loop<br/>Groq, fallback model on 429"]
+    L --> T
+    P --> T
+    X --> T
+    T["One tool layer (src/tools)<br/>add · list · update · delete · undo · summarize<br/>budget_status · set_budget · monthly_report<br/>top_spending · monthly_history"]
+  end
+  T --> D[("D1 (SQLite)<br/>expenses · budgets · categories<br/>merchant_map · legacy totals · logs · rate_limits")]
+```
+
+**Rules that keep the numbers right:** the model never writes a date, a total or a percentage. It picks a tool and fills in amount, category, note and a relative `date_token` (`yesterday`, `weekday:fri`). Code turns that into a Cairo calendar date. Every number on screen comes from SQL. Large amounts and old dates wait for a Confirm click. Every write is idempotent on its request id, and undo works for a whole message.
 
 ## Status
 
 | Phase | State |
 |---|---|
-| 0. Setup | Done locally. Cloudflare deploy needs your login (see below). |
-| 1. Core domain | Done: schema, Cairo date utility, 8 tools, per-month budgets with copy-forward, legacy import. |
-| 2. Chat + MVP UI | Done: `/chat` tool-calling loop, model config, chat UI with undo/confirm, budget table, recent expenses, request logs. |
-| 3. Security | Done in code: Access JWT verification, fail-closed auth, rate limits, CSRF guard, CSP. Turning on Access needs your dashboard: [docs/SECURITY.md](docs/SECURITY.md). |
-| 4. Reports + History | Done: monthly report (totals vs last month, category and daily charts, top expenses and items, projection, needs-review), 12-month history with month detail, all reconciled against the budget table. |
+| 0–2. Setup, core tools, chat + MVP UI | Done |
+| 3. Security | Done in code: Access JWT checks, fail-closed auth, rate limits, CSRF guard, CSP. Turning Access on needs your dashboard ([docs/SECURITY.md](docs/SECURITY.md)). |
+| 4. Reports + History | Done: report with charts, 12-month history, month detail; reconciled against the budget table. |
+| 5. Evals + optimization | Done: 82-case eval set, scorer, model/mode comparison driver, regex fast path + learned merchant cache, fallback model. **The model comparison needs your Groq key** ([eval/README.md](eval/README.md)). |
+| 6. MCP | Done: `/mcp` server on the same tools, tested with the official SDK client ([docs/MCP.md](docs/MCP.md)). |
+| 7. Polish + release | Done locally: this README, personal data moved out of the repo, deploy automation. Publishing the repo is your call. |
+| 8. Car maintenance log | Not started: the plan starts it after launch and a 14-day trial. |
 
-## How it works
+## Deploy for free (one time, about 15 minutes)
 
-```
-Browser (public/: HTML + JS, Track / Report / History)
-   |  HTTPS, behind Cloudflare Access; same origin
-   v
-Worker (src/index.ts): auth (Access JWT or APP_TOKEN), CSRF guard, rate limits
-   |-- /chat  -> src/chat/loop.ts: LLM picks tools, code runs them
-   |-- /api/* -> the same tool functions, called directly by the UI
-   |-- Tool layer (src/tools/): add, list, update, delete, undo, summarize,
-   |                               budget_status, set_budget, monthly_report, top_spending, monthly_history
-   v
-D1 (migrations/): expenses, budgets, categories, legacy_monthly_totals, merchant_map, logs, rate_limits
+You need three free accounts: **Cloudflare** (hosting + database + login wall), **Groq** (the LLM: console.groq.com/keys) and optionally **GitHub** (automatic deploys). After this, the app runs on Cloudflare; your laptop can be off.
+
+```bash
+npm install
 ```
 
-The model never writes a date, a total or a percentage. It chooses a tool and fills in amount, category, note and a relative `date_token` (`yesterday`, `weekday:fri`, and so on). Code turns the token into a calendar date in Africa/Cairo time. Every number in the UI comes from SQL, and every status line is built by code.
+```bash
+npx wrangler login
+```
 
-## Run it locally
+```bash
+npm run setup:cloudflare
+```
+
+`setup:cloudflare` creates the D1 database, applies the migrations, seeds your budgets and Excel totals from `data/personal.json`, deploys, and sets the two secrets. It asks for your Groq key and generates an `APP_TOKEN`, which it shows once; save it. It is safe to re-run. Commit the `database_id` it writes into `wrangler.jsonc`.
+
+Then:
+
+1. Open `https://expense-agent.<your-subdomain>.workers.dev`, enter the `APP_TOKEN` once, and log a test expense.
+2. Put **Cloudflare Access** in front (free, about 10 minutes): [docs/SECURITY.md](docs/SECURITY.md). Run its checklist before entering real data.
+3. Optional: push the repo to GitHub and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets. Every push to `main` then runs the tests and deploys (`.github/workflows/deploy.yml`).
+
+**Free-tier limits that matter:** Workers allow 100,000 requests a day with 10 ms CPU per request (the LLM wait doesn't count). D1 allows 5 GB and 100,000 row writes a day. Groq's free gpt-oss-120b allows about 1,000 requests and 200,000 tokens a day, roughly 25–30 chat messages that need the model. Messages the fast path handles cost no tokens, and when the main model's quota runs out the app switches to `llama-3.1-8b-instant` for that request.
+
+## Run locally
 
 ```bash
 npm install
@@ -42,81 +78,58 @@ npm run db:migrate:local
 ```
 
 ```bash
-npm run db:import-legacy:local
+npm run db:seed-personal:local
 ```
 
-Then pick a model:
-
-- **Real model:** copy `.dev.vars.example` to `.dev.vars` and set `LLM_API_KEY` to a Groq key (free at console.groq.com). Leave `LLM_BASE_URL` unset.
-- **No key yet:** keep the provided `.dev.vars` (it points at the mock) and run `node scripts/mock-llm.mjs` in a second terminal. The mock only understands simple `item amount, item amount` messages.
+For a model, either copy `.dev.vars.example` to `.dev.vars` and add your Groq key, or keep the provided mock setup and run `node scripts/mock-llm.mjs` alongside (it only understands `item amount` messages). Then:
 
 ```bash
 npm run dev
 ```
 
-Open http://localhost:8787.
+Open http://localhost:8787. With no auth configured, the Worker serves localhost only.
 
-## Tests
+## Your data
+
+`data/personal.json` (gitignored) holds your starting budgets and old spreadsheet totals. The format is in `data/personal.example.json`. Budgets only fill categories that have none yet, so changes made in the app are never overwritten. Spreadsheet totals are stored as monthly totals, never as fake transactions, and the import stops if a month doesn't add up to its expected total.
+
+Other holds what is left each month after spending, invested in an index fund, gold or crypto. Entries like `thndr 3000` or `gold 2000` go there without a review flag; anything else filed as Other is flagged for review.
+
+## Tests and evals
 
 ```bash
 npm test
 ```
 
-About 130 tests across date handling (including midnight in Cairo in summer and winter time), every tool, budgets, reports and history (including a check that the budget table, report and history agree), the legacy import reconciliation, the `/chat` loop with a scripted fake LLM, the HTTP routes, and security: Access JWT verification with a fake issuer, fail-closed auth, CSRF and rate limits.
-
-## Deploy (first time)
-
-These steps need your Cloudflare login, so run them yourself:
+About 195 tests: Cairo dates around midnight in summer and winter time, every tool, budgets and copy-forward, reports and history (including a check that every view agrees), the fast path, the merchant cache, the `/chat` loop with a scripted LLM, the fallback model, MCP, Access JWT verification with a fake issuer, fail-closed auth, CSRF and rate limits.
 
 ```bash
-npx wrangler login
+npm run eval -- --mode fastpath
 ```
 
 ```bash
-npx wrangler d1 create expense_agent
+npm run eval -- --mode llm,hybrid --models groq:openai/gpt-oss-120b,groq:llama-3.3-70b-versatile,groq:qwen/qwen3-32b
 ```
 
-Copy the printed `database_id` into `wrangler.jsonc`, then:
-
-```bash
-npm run db:migrate:remote
-```
-
-```bash
-npm run db:import-legacy:remote
-```
-
-```bash
-npx wrangler secret put LLM_API_KEY
-```
-
-```bash
-npx wrangler secret put APP_TOKEN
-```
-
-```bash
-npm run deploy
-```
-
-The deployed Worker refuses every API call until auth is configured. Set `APP_TOKEN` (the browser asks for it once and remembers it), then put Cloudflare Access in front following [docs/SECURITY.md](docs/SECURITY.md) and run its checklist before entering real data.
+Results land in [eval/RESULTS.md](eval/RESULTS.md). The fast-path-only run (no model) saves 30 of the 82 messages correctly with **0 false writes** and hands the other 52 to the LLM.
 
 ## Configuration
 
 | Name | Where | Default |
 |---|---|---|
-| `LLM_PROVIDER` | `wrangler.jsonc` vars | `groq` (or `openrouter`) |
-| `LLM_MODEL` | vars | `openai/gpt-oss-120b` |
+| `LLM_PROVIDER`, `LLM_MODEL` | `wrangler.jsonc` vars | `groq`, `openai/gpt-oss-120b` |
+| `LLM_FALLBACK_MODEL` | vars | `llama-3.1-8b-instant` (used after a 429) |
 | `LLM_BASE_URL` | vars or `.dev.vars` | derived from the provider |
-| `LARGE_AMOUNT_THRESHOLD` | vars | `5000` EGP: larger amounts need a Confirm click |
-| `OLD_DATE_CONFIRM_DAYS` | vars | `60` |
+| `FAST_PATH` | vars | `on` (`off` sends everything to the model) |
+| `LARGE_AMOUNT_THRESHOLD`, `OLD_DATE_CONFIRM_DAYS` | vars | `5000` EGP, `60` days |
 | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` | vars | empty (Access JWT check off) |
 | `CHAT_RATE_PER_MIN`, `CHAT_RATE_PER_DAY`, `API_RATE_PER_MIN` | vars | `20`, `500`, `300` (0 disables) |
 | `LLM_API_KEY`, `APP_TOKEN` | secrets / `.dev.vars` | none |
 
-## Budgets
+## Docs
 
-The monthly total budget is 31,000 EGP. Other is 18,650: it holds what is left each month, invested in Thndr index funds, gold or bitcoin. Investment entries filed under Other are not flagged for review; anything else filed there is. The remaining 12,350 is spread across the other categories; set each one on the Track tab (click "set") or by chat ("set groceries to 3000").
-
-## Legacy data
-
-`data/legacy_totals.json` holds monthly totals from the Excel sheets. They are stored as totals, never as fake transactions. The import refuses any month whose categories don't add up to its Excel total. Only October 2026 (1,800 EGP) is imported; earlier months stay empty on purpose.
+- [docs/DECISIONS.md](docs/DECISIONS.md): every design decision and why
+- [docs/SECURITY.md](docs/SECURITY.md): Access setup and the security checklist
+- [docs/MCP.md](docs/MCP.md): connecting MCP clients; direct function calling vs MCP
+- [eval/README.md](eval/README.md): running and extending the evals
+- [CHANGELOG.md](CHANGELOG.md)

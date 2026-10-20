@@ -13,5 +13,5 @@
     "resolveJsonModule": true,
     "allowJs": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "eval/**/*.ts", "vitest.config.ts", "vitest.eval.config.ts"]
 }
