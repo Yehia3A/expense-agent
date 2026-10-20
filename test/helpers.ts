@@ -24,19 +24,20 @@ export function makeCtx(opts: { now?: Date; requestId?: string; source?: Source 
   };
 }
 
-/** Back to the freshly migrated state: no expenses, logs or legacy totals; October budgets only. */
+/** Back to the freshly migrated state (0001-0003): no expenses, logs or legacy totals; October budgets only. */
 export async function resetDb(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM expenses"),
     env.DB.prepare("DELETE FROM logs"),
     env.DB.prepare("DELETE FROM legacy_monthly_totals"),
     env.DB.prepare("DELETE FROM merchant_map"),
+    env.DB.prepare("DELETE FROM rate_limits"),
     env.DB.prepare("DELETE FROM budgets"),
     env.DB.prepare(
       `INSERT INTO budgets (category, month, amount) VALUES
         ('food_dining','2026-10',NULL), ('groceries','2026-10',NULL), ('transport_fuel','2026-10',NULL),
         ('bills_utilities','2026-10',NULL), ('entertainment','2026-10',NULL), ('shopping','2026-10',NULL),
-        ('sports','2026-10',NULL), ('other','2026-10',12650)`,
+        ('sports','2026-10',NULL), ('other','2026-10',18650)`,
     ),
   ]);
 }

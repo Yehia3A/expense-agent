@@ -7,6 +7,13 @@ export interface Env {
   LLM_BASE_URL?: string;
   LARGE_AMOUNT_THRESHOLD?: string;
   OLD_DATE_CONFIRM_DAYS?: string;
+  // Cloudflare Access (Phase 3). Both must be set to enable JWT checks.
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  // Rate limits (Phase 3). 0 disables a limit.
+  CHAT_RATE_PER_MIN?: string;
+  CHAT_RATE_PER_DAY?: string;
+  API_RATE_PER_MIN?: string;
   // Secrets
   LLM_API_KEY?: string;
   APP_TOKEN?: string;
@@ -23,6 +30,14 @@ export function appConfig(env: Env): AppConfig {
     tz: env.TIMEZONE || "Africa/Cairo",
     largeAmountThreshold: num(env.LARGE_AMOUNT_THRESHOLD, 5000),
     oldDateConfirmDays: num(env.OLD_DATE_CONFIRM_DAYS, 60),
+  };
+}
+
+export function rateLimits(env: Env) {
+  return {
+    chatPerMin: num(env.CHAT_RATE_PER_MIN, 20),
+    chatPerDay: num(env.CHAT_RATE_PER_DAY, 500),
+    apiPerMin: num(env.API_RATE_PER_MIN, 300),
   };
 }
 

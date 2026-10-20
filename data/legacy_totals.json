@@ -1,5 +1,5 @@
 {
-  "_note": "Monthly category totals from the Excel sheets (D2: totals only, no fake transactions). August 2026 is missing its per-category breakdown: only 'other' = 17,533 of the 20,634 total is known. Add the remaining August categories here, then set expected_totals['2026-08'] = 20634.",
+  "_note": "Monthly category totals from the Excel sheets (D2: totals only, no fake transactions). Only October 2026 is imported; earlier months are intentionally left empty.",
   "months": {
     "2026-10": {
       "transport_fuel": 600,

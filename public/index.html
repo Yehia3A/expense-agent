@@ -9,11 +9,19 @@
 </head>
 <body>
   <header class="top">
-    <h1>ExpenseAgent</h1>
-    <span id="today" class="muted"></span>
+    <div class="brand">
+      <h1>ExpenseAgent</h1>
+      <span id="today" class="muted"></span>
+    </div>
+    <nav class="tabs" aria-label="Views">
+      <a id="tab-track" href="#track">Track</a>
+      <a id="tab-report" href="#report">Report</a>
+      <a id="tab-history" href="#history">History</a>
+    </nav>
   </header>
 
-  <main class="layout">
+  <!-- Track: chat, budget, recent -->
+  <main id="view-track" class="layout">
     <section class="card chat" aria-label="Chat">
       <div id="log" class="log" aria-live="polite">
         <p class="hint">Type what you spent, like <code>coffee 200, vegs 400</code> or <code>uber 85 yesterday</code>. You can also ask <code>how am I doing this month?</code></p>
@@ -51,16 +59,116 @@
     </section>
   </main>
 
+  <!-- Report -->
+  <main id="view-report" class="page" hidden>
+    <div class="page-head">
+      <h2>Monthly report</h2>
+      <select id="report-month" aria-label="Report month"></select>
+    </div>
+    <div id="report-tiles" class="tiles"></div>
+    <p id="report-note" class="muted small"></p>
+
+    <div class="report-grid">
+      <section class="card" aria-labelledby="rc-h">
+        <h3 id="rc-h">Spending by category</h3>
+        <div id="chart-cats-box" class="chart-box"><canvas id="chart-cats"></canvas></div>
+        <p id="report-cats-empty" class="muted small" hidden>Nothing spent this month.</p>
+        <div class="table-wrap">
+          <table id="report-cats" class="grid">
+            <thead><tr><th>Category</th><th class="num">Spent</th><th class="num">Share</th><th class="num hide-sm">Prev month</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="rd-h">
+        <h3 id="rd-h">Daily spending</h3>
+        <div id="chart-daily-box" class="chart-box daily"><canvas id="chart-daily"></canvas></div>
+        <p id="report-daily-empty" class="muted small" hidden>No transactions this month.</p>
+        <details>
+          <summary>Show as table</summary>
+          <div class="table-wrap">
+            <table id="report-daily" class="grid">
+              <thead><tr><th>Date</th><th class="num">Spent</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="rt-h">
+        <h3 id="rt-h">Top 5 expenses</h3>
+        <div id="report-top" class="table-wrap"></div>
+      </section>
+
+      <section class="card" aria-labelledby="ri-h">
+        <h3 id="ri-h">Top items</h3>
+        <div id="report-items"></div>
+      </section>
+
+      <section id="report-review-card" class="card wide" aria-labelledby="rr-h" hidden>
+        <h3 id="rr-h">Needs review</h3>
+        <p class="muted small">Filed under Other but not an investment. Edit to move each into its real category.</p>
+        <div class="table-wrap">
+          <table id="report-review" class="grid">
+            <thead><tr><th>Date</th><th>Item</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- History -->
+  <main id="view-history" class="page" hidden>
+    <section class="card" aria-labelledby="h12-h">
+      <h2 id="h12-h">Last 12 months</h2>
+      <p class="muted small">Select a month to see its detail. "-" means no records that month.</p>
+      <div class="table-wrap">
+        <table id="hist-table" class="grid history"><thead></thead><tbody></tbody><tfoot></tfoot></table>
+      </div>
+    </section>
+
+    <section id="hist-detail" class="card" aria-labelledby="hist-month-title">
+      <div class="card-head">
+        <h2 id="hist-month-title">Month</h2>
+        <select id="hist-month" aria-label="History month"></select>
+      </div>
+      <h3>Remaining by category</h3>
+      <div class="table-wrap">
+        <table id="hist-budget" class="grid">
+          <thead><tr><th>Category</th><th class="num">Budget</th><th class="num">Spent</th><th class="num"><span class="hide-sm">Remaining</span><span class="show-sm">Left</span></th><th class="num hide-sm">Prev month</th><th class="num"><span class="hide-sm">% Used</span><span class="show-sm">%</span></th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p id="hist-budget-note" class="muted small"></p>
+
+      <h3>Transactions</h3>
+      <div class="table-wrap">
+        <table id="hist-tx" class="grid">
+          <thead><tr><th>Date</th><th>Item</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p id="hist-tx-note" class="muted small"></p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="assertive"></div>
+
   <template id="tpl-edit">
     <tr class="editing">
-      <td><input type="date" name="date" required></td>
-      <td><input name="note" maxlength="200" required></td>
-      <td><select name="category"></select></td>
-      <td class="num"><input name="amount" type="number" min="0.01" step="0.01" required></td>
-      <td class="actions"><button type="button" data-act="save">Save</button><button type="button" data-act="cancel" class="ghost">Cancel</button></td>
+      <td><input type="date" name="date" required aria-label="Date"></td>
+      <td><input name="note" maxlength="200" required aria-label="Item"></td>
+      <td><select name="category" aria-label="Category"></select></td>
+      <td class="num"><input name="amount" type="number" min="0.01" step="0.01" required aria-label="Amount"></td>
+      <td class="actions"><button type="button" data-act="save" class="small">Save</button><button type="button" data-act="cancel" class="ghost small">Cancel</button></td>
     </tr>
   </template>
 
+  <script src="vendor/chart.umd.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

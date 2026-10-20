@@ -4,7 +4,7 @@ import { toolJsonSchemas } from "../src/tools/registry";
 describe("tool JSON schemas sent to the LLM (D16)", () => {
   const schemas = toolJsonSchemas();
 
-  it("covers the Phase 1 tool list", () => {
+  it("covers the Phase 1 and Phase 4 tool list", () => {
     expect(schemas.map((s) => s.name)).toEqual([
       "add_expense",
       "list_expenses",
@@ -14,6 +14,9 @@ describe("tool JSON schemas sent to the LLM (D16)", () => {
       "summarize",
       "budget_status",
       "set_budget",
+      "monthly_report",
+      "top_spending",
+      "monthly_history",
     ]);
   });
 

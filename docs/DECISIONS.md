@@ -4,8 +4,8 @@ One line per decision, with the reason. IDs D1-D7 come from the project plan in 
 
 | ID | Date | Decision | Reason |
 |----|------|----------|--------|
-| D1 | 2026-10-19 | Keep `other` for v1; every expense the model files as `other` gets `needs_review = 1`. | Plan default. Revisit once you decide what the 12,650 EGP "Other" budget really covers (rent, savings, debt, car). |
-| D2 | 2026-10-19 | Import monthly totals only, into `legacy_monthly_totals`, never as fake transactions. | Plan default. The July 2026 detail sheet is empty, and fake rows would pollute top-items reports. |
+| D1 | 2026-10-20 | `other` is the monthly remainder that gets invested (Thndr index fund, gold, bitcoin on Binance). Its budget is 18,650 EGP (12,650 + 6,000; migration 0003), for a 31,000 monthly total. Investment entries filed as `other` are not flagged; anything else filed as `other` gets `needs_review = 1`. | Your answer to D1. The keyword list lives in `needsReview()` in `src/tools/expenses.ts`. |
+| D2 | 2026-10-20 | Import monthly totals only, into `legacy_monthly_totals`, never as fake transactions. Only October 2026 is imported; August and earlier stay empty. | Your answer to D2. |
 | D3 | 2026-10-19 | Large-amount confirmation threshold = 5,000 EGP (`LARGE_AMOUNT_THRESHOLD` var). | Plan default. |
 | D4 | 2026-10-19 | Budget changes copy forward: `set_budget` updates the chosen month and every later month that already has rows, unless `apply_forward=false`. | Plan default. Past months are never touched. |
 | D8 | 2026-10-19 | Serve the UI from the Worker itself (Workers Static Assets) instead of a separate Pages project. | One deployment, same origin (no CORS), one Access policy to set up in Phase 3. Cloudflare now recommends this over Pages for new projects. |
@@ -22,3 +22,7 @@ One line per decision, with the reason. IDs D1-D7 come from the project plan in 
 | D19 | 2026-10-19 | Tests use `@cloudflare/vitest-plugin` 1.3.6 (the renamed `vitest-pool-workers`), with `compatibility_date` 2026-09-15 so the bundled test runtime supports it. | Plan: Vitest + Miniflare, pinned versions at least two weeks old. |
 | D20 | 2026-10-19 | The UI is plain JavaScript (no build step), not TypeScript. | Three small files; a bundler would add setup without adding safety for this size. Worker code stays TypeScript. |
 | D21 | 2026-10-19 | `scripts/mock-llm.mjs` is a keyword-based fake of the OpenAI API for local UI work without a key. It is not a parser and is never deployed. | Lets the full stack run locally; real behavior is measured with real models in Phase 5. |
+| D22 | 2026-10-20 | The Worker verifies the Cloudflare Access JWT itself (signature against the team's certs, issuer, audience, expiry), and fails closed: with no Access and no `APP_TOKEN` configured it serves only localhost. | Access at the edge alone leaves the raw workers.dev URL open; a forgotten secret should mean "down", not "public". |
+| D23 | 2026-10-20 | Rate limits are global fixed windows counted in D1 (`rate_limits` table), not the Workers rate-limit binding. | Works identically in `wrangler dev` and tests, is exact, and costs one D1 write per request, well inside the free tier for one user. |
+| D24 | 2026-10-20 | Chart.js 4.5.1 is vendored into `public/vendor/` instead of loaded from a CDN. | The CSP allows only same-origin scripts, and Access-protected pages should not depend on third-party hosts. `npm run vendor:chart` refreshes it. |
+| D25 | 2026-10-20 | History lists months newest first; its per-month budget table is read-only. | The current month is what you look at most. Editing a past month's budget from History would copy forward into later months by surprise; budgets are edited on Track. |

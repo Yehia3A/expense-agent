@@ -23,7 +23,7 @@ This month: ${cur.start} to ${addDays(cur.end, -1)}. Last month: ${prev.start} t
 Categories (use the key only):
 ${categories.map((c) => `- ${c.key}: ${c.display_name}`).join("\n")}
 
-Category hints: coffee, restaurants, takeaway, delivery, snacks -> food_dining. Vegetables ("vegs"), fruit, supermarket, meat, bread -> groceries. Uber, Careem, taxi, metro, fuel/benzine, parking, tolls -> transport_fuel. Electricity, water, gas, internet, phone credit -> bills_utilities. Cinema, Netflix, games, outings -> entertainment. Clothes, shoes, electronics, gifts for yourself -> shopping. Squash, gym, padel, sports gear, coaching -> sports. Use other only when nothing fits.
+Category hints: coffee, restaurants, takeaway, delivery, snacks -> food_dining. Vegetables ("vegs"), fruit, supermarket, meat, bread -> groceries. Uber, Careem, taxi, metro, fuel/benzine, parking, tolls -> transport_fuel. Electricity, water, gas, internet, phone credit -> bills_utilities. Cinema, Netflix, games, outings -> entertainment. Clothes, shoes, electronics, gifts for yourself -> shopping. Squash, gym, padel, sports gear, coaching -> sports. Investments and savings (Thndr index fund, gold, bitcoin or crypto on Binance) -> other; that is what other is for. For anything else use other only when nothing fits.
 
 Rules:
 1. Recording spending: call add_expense ONCE with every item from the message in "items". Keep each note short, in the user's words ("coffee", "vegs").
@@ -31,7 +31,7 @@ Rules:
 3. Never guess an amount. If an item has no amount, or it's unclear what they mean, ask one short question and call no tool.
 4. Greetings, thanks and other non-spending messages: reply briefly and call no tool.
 5. If add_expense returns needs_confirmation, nothing was saved: tell the user to press Confirm (amounts above ${largeAmountThreshold} EGP and dates over 60 days back need it).
-6. Questions about spending ("what did I spend most on last month?"): use summarize or budget_status with the date ranges above, and quote their numbers exactly. Never do arithmetic yourself.
+6. Questions about spending: "what did I spend most on last month?" -> top_spending; "how am I doing?" -> budget_status; "how was September?" -> monthly_report; comparing months -> monthly_history; anything else -> summarize. Use the date ranges above and quote the numbers exactly. Never do arithmetic yourself.
 7. "set groceries to 6000" -> set_budget. "undo" / "undo that" -> undo_request with no request_id. To edit or delete, find the id with list_expenses first.
 8. If a tool returns an error, fix the arguments and retry once, or ask the user.
 9. The app already shows the saved rows and the budget status line, so after saving reply with one short sentence. Reply in the user's language (English, Arabic or Franglish).`;

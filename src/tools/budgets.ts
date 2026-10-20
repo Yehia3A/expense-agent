@@ -35,6 +35,7 @@ export interface MonthSpend {
   byCategory: Map<string, number>;
   hasExpenses: boolean;
   hasLegacy: boolean;
+  legacyTotal: number;
   otherCurrencies: { currency: string; total: number }[];
 }
 
@@ -66,6 +67,7 @@ export async function monthSpend(db: D1Database, month: string): Promise<MonthSp
     byCategory,
     hasExpenses: exp!.results.length > 0 || other!.results.length > 0,
     hasLegacy: legacy!.results.length > 0,
+    legacyTotal: round2(legacy!.results.reduce((s, r) => s + r.total, 0)),
     otherCurrencies: other!.results.map((r) => ({ currency: r.currency!, total: round2(r.total) })),
   };
 }
@@ -95,6 +97,8 @@ export interface BudgetStatus {
   };
   other_currencies: { currency: string; total: number }[];
   needs_review_count: number;
+  /** Part of `spent` that comes from imported Excel totals rather than transactions (D9). */
+  legacy_total: number;
 }
 
 export async function budgetStatus(db: D1Database, month: string): Promise<BudgetStatus> {
@@ -154,6 +158,7 @@ export async function budgetStatus(db: D1Database, month: string): Promise<Budge
     },
     other_currencies: cur.otherCurrencies,
     needs_review_count: review?.n ?? 0,
+    legacy_total: cur.legacyTotal,
   };
 }
 

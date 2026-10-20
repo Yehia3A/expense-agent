@@ -140,8 +140,9 @@ describe("/chat tool-calling loop", () => {
 
     const confirm = () =>
       worker.fetch(
-        new Request("https://app.test/api/expenses", {
+        new Request("http://localhost/api/expenses", {
           method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({ request_id: res.pending!.request_id, items: res.pending!.items, confirmed: true }),
         }),
         env,
@@ -238,7 +239,7 @@ describe("/chat tool-calling loop", () => {
 });
 
 describe("HTTP routes", () => {
-  const call = (path: string, init: RequestInit = {}, e: typeof env = env) => worker.fetch(new Request(`https://app.test${path}`, init), e);
+  const call = (path: string, init: RequestInit = {}, e: typeof env = env) => worker.fetch(new Request(`http://localhost${path}`, { ...init, headers: { "content-type": "application/json", ...(init.headers as Record<string, string>) } }), e);
 
   it("APP_TOKEN guards /api and /chat when set (D14)", async () => {
     const locked = { ...env, APP_TOKEN: "s3cret-token" };

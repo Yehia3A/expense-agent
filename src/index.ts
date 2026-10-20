@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { ChatRequest, runChat } from "./chat/loop";
-import { appConfig, type Env } from "./env";
+import { appConfig, type Env, rateLimits } from "./env";
 import { ulid } from "./lib/ulid";
+import { authenticate } from "./security/auth";
+import { checkLimits, type Limit } from "./security/ratelimit";
 import { addExpenses, ItemInput, recentExpenses } from "./tools/expenses";
 import { callTool, type ToolOutcome } from "./tools/registry";
 import type { ToolContext } from "./tools/types";
@@ -9,13 +11,20 @@ import type { ToolContext } from "./tools/types";
 // Thin HTTP adapters over the tool layer (plan 6). Static UI files in
 // public/ are served by Workers Static Assets for every other path.
 
-const json = (data: unknown, status = 200) =>
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+  "referrer-policy": "no-referrer",
+};
+
+const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...SECURITY_HEADERS, ...extra },
   });
 
-const fail = (status: number, error: string, details?: unknown) => json({ error, details }, status);
+const fail = (status: number, error: string, details?: unknown, extra?: Record<string, string>) =>
+  json({ error, details }, status, extra);
 
 function apiCtx(env: Env, requestId: string = ulid()): ToolContext {
   return {
@@ -28,22 +37,20 @@ function apiCtx(env: Env, requestId: string = ulid()): ToolContext {
   };
 }
 
-/** Constant-time comparison so the token can't be guessed byte by byte from timing. */
-function sameToken(a: string, b: string): boolean {
-  const enc = new TextEncoder();
-  const x = enc.encode(a);
-  const y = enc.encode(b);
-  let diff = x.length ^ y.length;
-  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
-  return diff === 0;
-}
-
-/** D14: when APP_TOKEN is set, every /api and /chat call needs `Authorization: Bearer <token>`. */
-function authorized(req: Request, env: Env): boolean {
-  if (!env.APP_TOKEN) return true;
-  const header = req.headers.get("authorization") ?? "";
-  const m = /^Bearer\s+(.+)$/i.exec(header);
-  return !!m && sameToken(m[1]!.trim(), env.APP_TOKEN);
+/**
+ * CSRF guard. The API never sends CORS headers, so other sites can't read
+ * responses; this also stops them from *sending* writes. A browser always
+ * attaches Origin to cross-site POSTs, and JSON bodies need a preflight.
+ */
+function crossSiteWrite(req: Request, url: URL): string | null {
+  if (req.method === "GET" || req.method === "HEAD") return null;
+  const origin = req.headers.get("origin");
+  if (origin && origin !== url.origin) return "cross-origin request refused";
+  if (req.headers.get("sec-fetch-site") === "cross-site") return "cross-site request refused";
+  const type = req.headers.get("content-type") ?? "";
+  const hasBody = req.method === "POST" || req.method === "PUT" || req.method === "PATCH";
+  if (hasBody && !type.toLowerCase().startsWith("application/json")) return "content-type must be application/json";
+  return null;
 }
 
 async function body(req: Request): Promise<unknown> {
@@ -139,28 +146,74 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
 
   if (path === "/api/budgets" && method === "PUT") return mutate(env, "set_budget", await body(req));
 
+  if (path === "/api/report" && method === "GET") {
+    return fromOutcome(await callTool(apiCtx(env), "monthly_report", { month: q.month || undefined }));
+  }
+
+  if (path === "/api/history" && method === "GET") {
+    return fromOutcome(
+      await callTool(apiCtx(env), "monthly_history", {
+        end_month: q.end_month || undefined,
+        ...(q.months ? { months: Number(q.months) } : {}),
+      }),
+    );
+  }
+
+  if (path === "/api/top" && method === "GET") {
+    return fromOutcome(
+      await callTool(apiCtx(env), "top_spending", {
+        start_date: q.start_date,
+        end_date: q.end_date,
+        by: q.by || undefined,
+        ...(q.limit ? { limit: Number(q.limit) } : {}),
+      }),
+    );
+  }
+
   return fail(404, "not found");
 }
 
-export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url);
-    const isApi = url.pathname === "/chat" || url.pathname.startsWith("/api/");
-    if (!isApi) return env.ASSETS.fetch(req);
+export interface HandlerDeps {
+  /** Outbound fetch for the LLM and the Access certs; injectable for tests. */
+  fetchImpl?: typeof fetch;
+  now?: () => Date;
+}
 
-    if (!authorized(req, env)) return fail(401, "unauthorized");
+export async function handle(req: Request, env: Env, deps: HandlerDeps = {}): Promise<Response> {
+  const url = new URL(req.url);
+  const isChat = url.pathname === "/chat";
+  if (!isChat && !url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
 
-    try {
-      if (url.pathname === "/chat") {
-        if (req.method !== "POST") return fail(405, "method not allowed");
-        const parsed = ChatRequest.safeParse(await body(req));
-        if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
-        return json(await runChat(env, parsed.data));
-      }
-      return await handleApi(req, env, url);
-    } catch (e) {
-      console.error("unhandled", e);
-      return fail(500, "internal error");
+  const csrf = crossSiteWrite(req, url);
+  if (csrf) return fail(403, csrf);
+
+  const auth = await authenticate(req, env, { fetchImpl: deps.fetchImpl, now: deps.now?.().getTime() });
+  if (!auth.ok) return fail(auth.status, auth.error);
+
+  try {
+    const lim = rateLimits(env);
+    const limits: Limit[] = [{ bucket: "api:min", windowSec: 60, max: lim.apiPerMin }];
+    if (isChat) {
+      limits.push({ bucket: "chat:min", windowSec: 60, max: lim.chatPerMin }, { bucket: "chat:day", windowSec: 86400, max: lim.chatPerDay });
     }
-  },
+    const rl = await checkLimits(env.DB, limits, deps.now?.().getTime());
+    if (!rl.ok) {
+      return fail(429, "rate limit reached, try again later", { bucket: rl.bucket }, { "retry-after": String(rl.retryAfterSec) });
+    }
+
+    if (isChat) {
+      if (req.method !== "POST") return fail(405, "method not allowed");
+      const parsed = ChatRequest.safeParse(await body(req));
+      if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
+      return json(await runChat(env, parsed.data, { fetchImpl: deps.fetchImpl, now: deps.now }));
+    }
+    return await handleApi(req, env, url);
+  } catch (e) {
+    console.error("unhandled", e);
+    return fail(500, "internal error");
+  }
+}
+
+export default {
+  fetch: (req: Request, env: Env) => handle(req, env),
 } satisfies ExportedHandler<Env>;

@@ -26,7 +26,14 @@
     "LLM_PROVIDER": "groq",
     "LLM_MODEL": "openai/gpt-oss-120b",
     "LARGE_AMOUNT_THRESHOLD": "5000",
-    "OLD_DATE_CONFIRM_DAYS": "60"
+    "OLD_DATE_CONFIRM_DAYS": "60",
+    // Cloudflare Access (docs/SECURITY.md). Fill both to require an Access JWT.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    // Global rate limits protecting the free LLM quota. 0 disables a limit.
+    "CHAT_RATE_PER_MIN": "20",
+    "CHAT_RATE_PER_DAY": "500",
+    "API_RATE_PER_MIN": "300"
   },
   "observability": { "enabled": true }
   // Secrets (never in this file): LLM_API_KEY, APP_TOKEN

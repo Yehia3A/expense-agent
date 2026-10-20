@@ -104,6 +104,23 @@ describe("add_expense", () => {
     expect(r.status === "saved" && r.saved[0]!.needs_review).toBe(1);
   });
 
+  it("investments belong in 'other' and are not flagged (D1 resolved)", async () => {
+    const r = await addExpenses(makeCtx(), [
+      { amount: 3000, category: "other", note: "thndr index fund" },
+      { amount: 2000, category: "other", note: "gold" },
+      { amount: 1500, category: "other", note: "bitcoin on binance" },
+      { amount: 200, category: "other", note: "random thing" },
+    ]);
+    expect(r.status === "saved" && r.saved.map((s) => s.needs_review)).toEqual([0, 0, 0, 1]);
+  });
+
+  it("editing a flagged 'other' note into an investment clears the flag", async () => {
+    const r = await addExpenses(makeCtx(), [{ amount: 500, category: "other", note: "misc" }]);
+    const id = r.status === "saved" ? r.saved[0]!.id : "";
+    const u = await updateExpense(makeCtx(), id, { note: "thndr" });
+    expect(u.updated.needs_review).toBe(0);
+  });
+
   it("is idempotent: retrying the same request_id never double-writes (N4)", async () => {
     const items = [
       { amount: 200, category: "food_dining" as const, note: "coffee" },
@@ -221,7 +238,7 @@ describe("budgets", () => {
     await ensureBudgets(env.DB, "2026-12");
     const dec = await budgetStatus(env.DB, "2026-12");
     expect(dec.rows.find((r) => r.category === "groceries")!.budget).toBe(6000);
-    expect(dec.rows.find((r) => r.category === "other")!.budget).toBe(12650);
+    expect(dec.rows.find((r) => r.category === "other")!.budget).toBe(18650);
   });
 
   it("never copies backwards: months before the first budget month are untracked", async () => {
@@ -261,15 +278,15 @@ describe("budgets", () => {
     expect(food).toMatchObject({ budget: 500, spent: 600, remaining: -100, prev_spent: 300, pct_used: 120 });
     const shopping = s.rows.find((r) => r.category === "shopping")!;
     expect(shopping).toMatchObject({ budget: null, spent: 700, remaining: null, pct_used: null });
-    // Budgeted: food 500 + groceries 1000 + other 12650.
+    // Budgeted: food 500 + groceries 1000 + other 18650.
     expect(s.total).toEqual({
-      budget: 14150,
+      budget: 20150,
       spent: 1550,
       budgeted_spent: 850,
       unbudgeted_spent: 700,
-      remaining: 13300,
+      remaining: 19300,
       prev_spent: 300,
-      pct_used: 6,
+      pct_used: 4.2,
     });
     expect(s.total.spent).toBe(s.rows.reduce((sum, r) => sum + r.spent, 0));
     expect(s.rows.map((r) => r.category)).toEqual([
@@ -317,10 +334,10 @@ describe("legacy import (plan 8.1)", () => {
   });
 
   it("refuses a file whose categories do not add up to the Excel total", () => {
-    expect(() => legacyRows({ months: { "2026-08": { other: 17533 } }, expected_totals: { "2026-08": 20634 } })).toThrow(
-      /sum to 17533/,
+    expect(() => legacyRows({ months: { "2026-09": { other: 900 } }, expected_totals: { "2026-09": 1000 } })).toThrow(
+      /sum to 900/,
     );
-    expect(() => legacyRows({ months: { "2026-08": { pets: 1 } }, expected_totals: {} })).toThrow(/unknown category/);
+    expect(() => legacyRows({ months: { "2026-09": { pets: 1 } }, expected_totals: {} })).toThrow(/unknown category/);
   });
 
   it("re-import is idempotent and legacy totals add to real expenses in the same month (D9)", async () => {

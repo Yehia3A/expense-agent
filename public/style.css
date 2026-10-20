@@ -5,6 +5,7 @@
   --muted: #66706c;
   --line: #e3e7e4;
   --accent: #1f7a5a;
+  --accent-strong: #165c43;
   --accent-ink: #ffffff;
   --user: #e6f2ec;
   --ok: #1f7a5a;
@@ -22,6 +23,7 @@
     --muted: #9aa5a0;
     --line: #2b332f;
     --accent: #3fae84;
+    --accent-strong: #62c79e;
     --accent-ink: #0b1410;
     --user: #1f3129;
     --ok: #4cc493;
@@ -40,9 +42,58 @@ body {
   color: var(--text);
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
-.top { display: flex; align-items: baseline; gap: 12px; padding: 16px 16px 4px; max-width: 1200px; margin: 0 auto; }
+[hidden] { display: none !important; }
+.top {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+  padding: 14px 16px 4px; max-width: 1200px; margin: 0 auto;
+}
+.brand { display: flex; align-items: baseline; gap: 12px; }
+.tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.tabs a { color: var(--muted); text-decoration: none; padding: 6px 14px; border-radius: 7px; font-weight: 600; font-size: 14px; }
+.tabs a:hover { color: var(--text); }
+.tabs a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
 h1 { font-size: 20px; margin: 0; }
 h2 { font-size: 15px; margin: 0; }
+h3 { font-size: 14px; margin: 0 0 10px; }
+.card h3 + .table-wrap, .card .table-wrap + h3 { margin-top: 0; }
+#hist-detail h3 { margin-top: 16px; }
+h4 { font-size: 12px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.nowrap { white-space: nowrap; }
+.strong { font-weight: 700; }
+
+/* Report and History pages */
+.page { display: grid; gap: 16px; padding: 12px 16px 32px; max-width: 1200px; margin: 0 auto; }
+.page-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.page-head h2 { font-size: 17px; }
+.page > p { margin: -6px 0 0; }
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.tile-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+.tile-value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.report-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) {
+  .report-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .report-grid .wide { grid-column: 1 / -1; }
+}
+.chart-box { position: relative; height: 220px; margin-bottom: 10px; }
+.chart-box.daily { height: 200px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.two-col { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+select {
+  appearance: auto;
+  min-width: 0;
+}
+.grid.history th.sticky { position: sticky; left: 0; background: var(--card); z-index: 1; text-align: left; white-space: nowrap; }
+.grid.history thead th:not(.sticky) { white-space: normal; min-width: 76px; }
+.grid tbody th, .grid tfoot th { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--text); font-weight: 600; }
+.grid.history tr.selected th.sticky, .grid.history tr.clickable:hover th.sticky { background: var(--user); }
+.grid tr.clickable { cursor: pointer; }
+.grid tr.clickable:hover td, .grid tr.clickable:hover th { background: var(--bar-bg); }
+.grid tr.selected td, .grid tr.selected th { background: var(--user); }
+
+.toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; z-index: 10; width: min(92vw, 420px); }
+.toast-item { background: var(--card); color: var(--bad); border: 1px solid var(--bad); border-radius: 10px; padding: 10px 14px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.15); }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 code { background: var(--bar-bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }

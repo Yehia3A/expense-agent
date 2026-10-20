@@ -35,6 +35,15 @@ interface ResolvedItem {
 
 const nowIso = (ctx: ToolContext) => ctx.now().toISOString();
 
+// D1: 'other' holds what is left each month, invested in index funds, gold or
+// bitcoin. Those entries are expected there; anything else filed as 'other'
+// is flagged for review because it probably belongs in a real category.
+const INVESTMENT_NOTE = /thndr|index fund|\bfund\b|gold|dahab|bitcoin|\bbtc\b|binance|crypto|usdt|invest|saving|ادخار|استثمار|دهب|ذهب/i;
+
+export function needsReview(category: CategoryKey, note: string): 0 | 1 {
+  return category === "other" && !INVESTMENT_NOTE.test(note) ? 1 : 0;
+}
+
 async function getRow(db: D1Database, id: string): Promise<ExpenseRow | null> {
   return db.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first<ExpenseRow>();
 }
@@ -118,7 +127,7 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
         r.category,
         r.expense_date,
         r.note,
-        r.category === "other" ? 1 : 0, // D1: anything filed as 'other' is flagged for review
+        needsReview(r.category, r.note),
         ctx.source,
         ctx.requestId,
         first + i,
@@ -202,10 +211,8 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
   if (fields.amount !== undefined) next.amount = fields.amount;
   if (fields.currency !== undefined) next.currency = fields.currency;
   if (fields.note !== undefined) next.note = fields.note;
-  if (fields.category !== undefined) {
-    next.category = fields.category;
-    next.needs_review = fields.category === "other" ? 1 : 0;
-  }
+  if (fields.category !== undefined) next.category = fields.category;
+  if (fields.category !== undefined || fields.note !== undefined) next.needs_review = needsReview(next.category, next.note);
   if (fields.date_token !== undefined) {
     const t = today(ctx);
     const d = resolveDateToken(fields.date_token, t);
