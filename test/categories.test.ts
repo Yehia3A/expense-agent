@@ -72,12 +72,21 @@ describe("setting up categories", () => {
     [Array.from({ length: 11 }, (_, i) => ({ name: `Cat ${i}` })), /Up to 10/],
     [[{ name: "Food" }, { name: "food" }], /listed twice/],
     [[{ name: "Other" }], /already included/],
-    [[{ name: "x".repeat(31) }], /too long/],
+    [[{ name: "x".repeat(36) }], /too long/],
   ])("refuses bad lists %#", async (cats, msg) => {
     const { cookie } = await newAccount();
     const res = await putCats(cookie, cats);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toMatch(msg);
+  });
+
+  it("names can be up to 35 characters", async () => {
+    const { cookie } = await newAccount();
+    const name = "Kids school fees and activities 2026"; // 36
+    expect((await putCats(cookie, [{ name }])).status).toBe(400);
+    const ok = await putCats(cookie, [{ name: name.slice(0, 35) }]);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as Payload).categories[0]!.name).toBe(name.slice(0, 35));
   });
 
   it("names in any language work; the model and the API can use the name or the key", async () => {

@@ -19,7 +19,7 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
   const count = el("span", { class: "cat-count" });
   const total = el("p", { class: "cat-total" });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
-  const addInput = el("input", { type: "text", maxlength: "30", placeholder: "Write your own, e.g. Car or Rent", "aria-label": "New category name" });
+  const addInput = el("input", { type: "text", maxlength: "35", placeholder: "Write your own, e.g. Car or Rent", "aria-label": "New category name" });
   const addBtn = el("button", { type: "submit", class: "small" }, "Add");
   const addForm = el("form", { class: "cat-add" }, addInput, addBtn);
   const save = el("button", { type: "button", class: "btn-block" }, el("span", { class: "btn-label" }, submitLabel));
@@ -87,7 +87,7 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
     );
     list.replaceChildren(
       ...items.map((item, idx) => {
-        const name = el("input", { type: "text", value: item.name, maxlength: "30", "aria-label": "Category name", class: "cat-name" });
+        const name = el("input", { type: "text", value: item.name, maxlength: "35", "aria-label": "Category name", class: "cat-name" });
         name.addEventListener("input", () => {
           item.name = name.value;
         });

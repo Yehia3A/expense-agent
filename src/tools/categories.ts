@@ -120,7 +120,7 @@ export async function saveCategories(
   if (list.length > MAX_CATEGORIES) return { ok: false, error: `Up to ${MAX_CATEGORIES} categories (plus Other).` };
   const seen = new Set<string>();
   for (const i of list) {
-    if (i.name.length > 30) return { ok: false, error: `"${i.name.slice(0, 30)}…" is too long (30 characters at most).` };
+    if (i.name.length > 35) return { ok: false, error: `"${i.name.slice(0, 35)}…" is too long (35 characters at most).` };
     const n = norm(i.name);
     if (n === norm(OTHER_NAME)) return { ok: false, error: `"Other" is already included automatically.` };
     if (seen.has(n)) return { ok: false, error: `"${i.name}" is listed twice.` };
