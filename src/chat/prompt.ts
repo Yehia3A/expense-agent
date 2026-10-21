@@ -7,6 +7,13 @@ export interface CategoryInfo {
   display_name: string;
   /** Examples of what belongs there (suggested categories have them). */
   hint?: string;
+  /** Items this user actually filed here recently, most frequent first (D43). */
+  examples?: string[];
+}
+
+function describe(c: CategoryInfo): string {
+  const about = c.examples?.length ? `you filed here: ${c.examples.join(", ")}` : c.hint ? `e.g. ${c.hint}` : "";
+  return `- ${c.key}: ${c.display_name}${about ? ` (${about})` : ""}`;
 }
 
 /**
@@ -22,10 +29,13 @@ export function systemPrompt(today: string, categories: CategoryInfo[], largeAmo
 Today is ${WEEKDAY_NAMES[weekday(today)]} ${today} (Africa/Cairo).
 This month: ${cur.start} to ${addDays(cur.end, -1)}. Last month: ${prev.start} to ${addDays(prev.end, -1)}.
 
-This user's own categories (use the key only; they chose these names themselves):
-${categories.map((c) => `- ${c.key}: ${c.display_name}${c.hint ? ` (e.g. ${c.hint})` : ""}`).join("\n")}
+This user's own categories (use the key only; they chose these names themselves), with what they actually filed in each recently:
+${categories.map(describe).join("\n")}
 
-Pick the category whose name fits the item best, the way this user would file it (e.g. "vegs" belongs in a groceries-like category, "uber" in a transport-like one, Thndr/gold/bitcoin in an investments or savings one). Use other only when nothing fits.
+How to choose a category:
+- Think about what the item is and pick the category whose name and past items it fits best, the way this user files things. Example: with a "Healthy snacks" category, a protein bar, greek yogurt or a healthy drink goes there, not into a general food category.
+- Prefer the most specific category over a general one. If the user filed the same or a similar item before, use that category again.
+- Use other only when nothing fits. If two categories fit equally well, pick the more specific one; don't ask.
 
 Rules:
 1. Recording spending: call add_expense ONCE with every item from the message in "items". Keep each note short, in the user's words ("coffee", "vegs").

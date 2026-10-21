@@ -181,3 +181,66 @@ describe("categories in chat and MCP", () => {
     ]);
   });
 });
+
+describe("smart categories (D43)", () => {
+  const capture = () => {
+    const prompts: string[] = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      prompts.push(JSON.parse(init.body as string).messages[0].content);
+      return Response.json({ choices: [{ message: { content: "ok" } }] });
+    }) as unknown as typeof fetch;
+    return { prompts, fetchImpl };
+  };
+
+  it("the model sees what you filed in each category and is told to prefer the most specific one", async () => {
+    const a = await newAccount("snacker");
+    await putCats(a.cookie, [{ name: "Food & Dining" }, { name: "Healthy snacks" }]);
+    const ctx = makeCtx({ userId: a.id });
+    await callTool(ctx, "add_expense", {
+      items: [
+        { amount: 45, category: "healthy_snacks", note: "protein bar" },
+        { amount: 45, category: "healthy_snacks", note: "Protein bar" },
+        { amount: 30, category: "healthy_snacks", note: "greek yogurt" },
+        { amount: 200, category: "food_dining", note: "pizza" },
+      ],
+    });
+    const c = capture();
+    await runChat(env, a.id, { message: "how much on snacks?", request_id: "smart-1", history: [] }, { now: () => NOW, fetchImpl: c.fetchImpl });
+    const p = c.prompts[0]!;
+    expect(p).toContain("- healthy_snacks: Healthy snacks (you filed here: protein bar, greek yogurt)");
+    expect(p).toContain("- food_dining: Food & Dining (you filed here: pizza)");
+    expect(p).toMatch(/Prefer the most specific category/);
+    expect(p).toMatch(/Healthy snacks.*protein bar, greek yogurt or a healthy drink goes there/);
+  });
+
+  it("categories without history still show their suggestion hints", async () => {
+    const a = await newAccount("fresh");
+    await putCats(a.cookie, [{ name: "Groceries" }]);
+    const c = capture();
+    await runChat(env, a.id, { message: "hi", request_id: "smart-2", history: [] }, { now: () => NOW, fetchImpl: c.fetchImpl });
+    expect(c.prompts[0]).toContain("- groceries: Groceries (e.g. supermarket");
+  });
+
+  it("the fast path steps aside when an item shares a word with your own category", async () => {
+    const a = await newAccount("snacker2");
+    await env.DB.prepare("INSERT INTO merchant_map (user_id, term, category, hits, updated_at) VALUES ('', 'snacks', 'food_dining', 1, 'x'), ('', 'pizza', 'food_dining', 1, 'x')").run();
+    await putCats(a.cookie, [{ name: "Food & Dining" }, { name: "Healthy snacks" }]);
+    const c = capture();
+    // "snacks" would be Food & Dining by the shared words; with a "Healthy snacks" category the AI decides.
+    const r1 = await runChat(env, a.id, { message: "snacks 40", request_id: "smart-3", history: [] }, { now: () => NOW, fetchImpl: c.fetchImpl });
+    expect(r1.path).toBe("llm");
+    // Unrelated items still use the fast path.
+    const r2 = await runChat(env, a.id, { message: "pizza 150", request_id: "smart-4", history: [] }, { now: () => NOW, fetchImpl: c.fetchImpl });
+    expect(r2).toMatchObject({ path: "fast" });
+    expect(r2.saved[0]!.category).toBe("food_dining");
+  });
+
+  it("once you file an item in your own category, it goes straight there next time", async () => {
+    const a = await newAccount("snacker3");
+    await putCats(a.cookie, [{ name: "Food & Dining" }, { name: "Healthy snacks" }]);
+    await callTool(makeCtx({ userId: a.id }), "add_expense", { items: [{ amount: 45, category: "healthy_snacks", note: "protein bar" }] });
+    const r = await runChat(env, a.id, { message: "protein bar 50", request_id: "smart-5", history: [] }, { now: () => NOW });
+    expect(r).toMatchObject({ path: "fast" });
+    expect(r.saved[0]!.category).toBe("healthy_snacks");
+  });
+});

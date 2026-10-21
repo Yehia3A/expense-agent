@@ -12,7 +12,13 @@ export function normalizeTerm(note: string): string {
 }
 
 /** Exact term first; otherwise single words, but only if they all agree. */
-export async function lookupCategory(db: D1Database, userId: string, note: string, allowed?: Set<string>): Promise<CategoryKey | null> {
+export async function lookupCategory(
+  db: D1Database,
+  userId: string,
+  note: string,
+  allowed?: Set<string>,
+  useShared = true,
+): Promise<CategoryKey | null> {
   const term = normalizeTerm(note);
   const words = [...new Set(term.split(" ").filter((w) => w.length >= 3))];
   const terms = [...new Set([term, ...words])];
@@ -28,7 +34,9 @@ export async function lookupCategory(db: D1Database, userId: string, note: strin
   // Per term, the user's own row beats the shared one. Shared words only count
   // for categories this account actually has (D41).
   const best = new Map<string, CategoryKey>();
-  for (const r of rows) if (r.user_id === SHARED && !best.has(r.term) && (!allowed || allowed.has(r.category))) best.set(r.term, r.category);
+  if (useShared) {
+    for (const r of rows) if (r.user_id === SHARED && !best.has(r.term) && (!allowed || allowed.has(r.category))) best.set(r.term, r.category);
+  }
   for (const r of rows) if (r.user_id !== SHARED && (!allowed || allowed.has(r.category))) best.set(r.term, r.category);
 
   const exact = best.get(term);

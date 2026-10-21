@@ -1,4 +1,12 @@
-import { userCategories } from "../tools/categories";
+import { OTHER_KEY, PRESETS, userCategories } from "../tools/categories";
+
+/** Lower-case words of 3+ letters with a plural "s" dropped: "Healthy snacks" -> healthy, snack. */
+const stems = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 3)
+    .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
 import { lookupCategory } from "../tools/merchants";
 import type { CategoryKey } from "../tools/types";
 
@@ -85,10 +93,18 @@ export function parseFast(message: string): FastParse | null {
 export async function fastPath(db: D1Database, userId: string, message: string) {
   const parsed = parseFast(message);
   if (!parsed) return null;
-  const allowed = new Set((await userCategories(db, userId)).map((c) => c.key));
+  const cats = await userCategories(db, userId);
+  const allowed = new Set(cats.map((c) => c.key));
+  // D43: words from the user's own (non-suggested) category names, e.g.
+  // "healthy" and "snack" from "Healthy snacks". An item that shares one is
+  // the AI's call, not the shared starter vocabulary's.
+  const customWords = new Set(
+    cats.filter((c) => c.key !== OTHER_KEY && !PRESETS.some((p) => p.key === c.key)).flatMap((c) => stems(c.name)),
+  );
   const items: { note: string; amount: number; category: CategoryKey; date_token?: string }[] = [];
   for (const it of parsed.items) {
-    const category = await lookupCategory(db, userId, it.note, allowed);
+    const useShared = !stems(it.note).some((w) => customWords.has(w));
+    const category = await lookupCategory(db, userId, it.note, allowed, useShared);
     if (!category) return null;
     items.push({ ...it, category, ...(parsed.date_token ? { date_token: parsed.date_token } : {}) });
   }

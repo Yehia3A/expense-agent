@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { appConfig, type Env, rateLimits } from "../env";
-import { localDate } from "../lib/dates";
+import { addDays, localDate } from "../lib/dates";
 import { ulid } from "../lib/ulid";
 import { checkLimits } from "../security/ratelimit";
 import { hintFor, userCategories } from "../tools/categories";
@@ -187,7 +187,29 @@ async function runLlm(
     }
   };
 
-  const categories = (await userCategories(env.DB, ctx.userId)).map((c) => ({ key: c.key, display_name: c.name, hint: hintFor(c.key) }));
+  // D43: show the model what this user actually files in each category, so a
+  // custom one like "Healthy snacks" pulls in protein bars and greek yogurt.
+  const recent = (
+    await env.DB.prepare(
+      `SELECT category, lower(trim(note)) AS item, COUNT(*) AS n FROM expenses
+       WHERE user_id = ? AND deleted_at IS NULL AND expense_date >= ?
+       GROUP BY category, item ORDER BY n DESC, MAX(created_at) DESC LIMIT 300`,
+    )
+      .bind(ctx.userId, addDays(localDate(ctx.now(), ctx.config.tz), -120))
+      .all<{ category: string; item: string; n: number }>()
+  ).results;
+  const examples = new Map<string, string[]>();
+  for (const r of recent) {
+    const list = examples.get(r.category) ?? [];
+    if (list.length < 6 && r.item.length <= 40) list.push(r.item);
+    examples.set(r.category, list);
+  }
+  const categories = (await userCategories(env.DB, ctx.userId)).map((c) => ({
+    key: c.key,
+    display_name: c.name,
+    hint: hintFor(c.key),
+    examples: examples.get(c.key),
+  }));
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, ctx.config.largeAmountThreshold) },
     ...req.history,
