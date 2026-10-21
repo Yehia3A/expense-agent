@@ -1,6 +1,7 @@
 // Category editor (D41): pick suggestions or write your own names, up to the
 // limit, each with a monthly budget; "Other" is always there. Used by the
 // first-time setup screen and by "Edit categories" on the Budget card.
+import { currencyPicker } from "./currency.js";
 import { api, el, fmt } from "./lib.js";
 
 /**
@@ -13,6 +14,15 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
   let items = payload.categories.filter((c) => !c.is_other).map((c) => ({ key: c.key, name: c.name, budget: c.budget }));
   const other = payload.categories.find((c) => c.is_other);
   let otherBudget = other?.budget ?? null;
+  const savedCurrency = payload.currency ?? "EGP";
+  let currency = payload.initialCurrency ?? savedCurrency;
+  const curNote = el("p", { class: "muted small cur-note", hidden: true }, "Amounts aren't converted: what you recorded so far will show in the new currency.");
+  const picker = currencyPicker(currency, (c) => {
+    currency = c;
+    if (c) for (const u of root.querySelectorAll(".unit")) u.textContent = `${c} / month`;
+    curNote.hidden = payload.needs_setup || !c || c === savedCurrency;
+    updateTotal();
+  });
 
   const chips = el("div", { class: "chips", role: "group", "aria-label": "Suggested categories" });
   const list = el("div", { class: "cat-list" });
@@ -43,7 +53,7 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
       class: "cat-budget",
     });
     input.addEventListener("input", () => onChange(input.value === "" ? null : Math.max(0, Number(input.value))));
-    return el("label", { class: "budget-field" }, input, el("span", { class: "unit" }, "EGP / month"));
+    return el("label", { class: "budget-field" }, input, el("span", { class: "unit" }, `${currency ?? savedCurrency} / month`));
   }
 
   function showError(msg) {
@@ -66,7 +76,7 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
 
   function updateTotal() {
     const sum = items.reduce((s, i) => s + (i.budget ?? 0), 0) + (otherBudget ?? 0);
-    total.textContent = sum > 0 ? `Monthly budget in total: ${fmt(sum)} EGP` : "No budgets yet. You can track spending without them.";
+    total.textContent = sum > 0 ? `Monthly budget in total: ${fmt(sum)} ${currency ?? ""}` : "No budgets yet. You can track spending without them.";
     count.textContent = `${items.length} of ${max}`;
   }
 
@@ -123,11 +133,12 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
 
   save.addEventListener("click", async () => {
     const clean = items.map((i) => ({ ...i, name: i.name.trim() })).filter((i) => i.name);
+    if (!currency) return showError("Pick a currency, or type a valid 3-letter code like USD.");
     save.disabled = true;
     save.classList.add("loading");
     showError("");
     try {
-      const saved = await api("/api/categories", { method: "PUT", body: { categories: clean, other_budget: otherBudget } });
+      const saved = await api("/api/categories", { method: "PUT", body: { categories: clean, other_budget: otherBudget, currency } });
       onSaved?.(saved);
     } catch (err) {
       showError(err.message);
@@ -147,6 +158,8 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
     : save;
 
   root.replaceChildren(
+    picker,
+    curNote,
     el("h3", { class: "cat-h" }, "Suggestions"),
     chips,
     el("h3", { class: "cat-h" }, "Your categories ", count),

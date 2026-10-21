@@ -4,6 +4,8 @@
 // own values. Thin bars with 4px rounded ends anchored to the baseline,
 // recessive grid on the value axis only, hover tooltips on every bar.
 
+import { state } from "./lib.js";
+
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
@@ -33,7 +35,7 @@ function base(horizontal) {
         borderWidth: 1,
         padding: 8,
         displayColors: false,
-        callbacks: { label: (ctx) => `${fmt(horizontal ? ctx.parsed.x : ctx.parsed.y)} EGP` },
+        callbacks: { label: (ctx) => `${fmt(horizontal ? ctx.parsed.x : ctx.parsed.y)} ${state.currency}` },
       },
     },
     scales: horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis },

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { monthOf } from "../lib/dates";
 import { budgetStatus, ensureBudgets } from "./budgets";
+import { currencyOf } from "./currency";
 import { defineTool, today, ToolError, type ToolContext } from "./types";
 
 // Per-account categories (D41). Each account picks suggested categories or
@@ -215,7 +216,7 @@ export const listCategoriesTool = defineTool({
   input: z.object({}),
   async run(ctx) {
     const month = monthOf(today(ctx));
-    const status = await budgetStatus(ctx.db, ctx.userId, month);
+    const status = await budgetStatus(ctx.db, ctx.userId, month, await currencyOf(ctx));
     const budget = new Map(status.rows.map((r) => [r.category, r.budget]));
     return { month, categories: (await userCategories(ctx.db, ctx.userId)).map((c) => ({ key: c.key, name: c.name, budget: budget.get(c.key) ?? null })) };
   },

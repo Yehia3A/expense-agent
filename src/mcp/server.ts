@@ -122,7 +122,7 @@ export async function handleMcp(req: Request, env: Env, deps: McpDeps): Promise<
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions:
-          "Personal expense tracker (EGP, Africa/Cairo dates). Record spending with add_expense, never invent amounts, " +
+          "Personal expense tracker (amounts in the account currency unless a currency is given; Africa/Cairo dates). Record spending with add_expense, never invent amounts, " +
           "and answer spending questions with the read-only tools, quoting their numbers exactly.",
       });
     }

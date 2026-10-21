@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { addMonths, isValidMonth, monthOf, monthRange } from "../lib/dates";
 import { resolveCategory, userCategories } from "./categories";
+import { accountCurrency, currencyOf } from "./currency";
 import { CategoryInput, type CategoryKey, defineTool, today, type ToolContext } from "./types";
 
 // Budget math (plan 10.1). Every number here comes from SQL plus plain
 // arithmetic in code; the model never computes totals (N7).
-
-export const BASE_CURRENCY = "EGP";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -40,8 +39,8 @@ export interface MonthSpend {
   otherCurrencies: { currency: string; total: number }[];
 }
 
-/** Spending per category for a month: real EGP expenses + legacy totals (D9). */
-export async function monthSpend(db: D1Database, userId: string, month: string): Promise<MonthSpend> {
+/** Spending per category for a month: real expenses in the account currency + legacy totals (D9). */
+export async function monthSpend(db: D1Database, userId: string, month: string, currency: string): Promise<MonthSpend> {
   const { start, end } = monthRange(month);
   const [exp, legacy, other] = await db.batch<{ category: string; total: number; n?: number; currency?: string }>([
     db
@@ -50,7 +49,7 @@ export async function monthSpend(db: D1Database, userId: string, month: string):
          WHERE user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?
          GROUP BY category`,
       )
-      .bind(userId, BASE_CURRENCY, start, end),
+      .bind(userId, currency, start, end),
     db.prepare("SELECT category, amount AS total FROM legacy_monthly_totals WHERE user_id = ? AND month = ?").bind(userId, month),
     db
       .prepare(
@@ -58,7 +57,7 @@ export async function monthSpend(db: D1Database, userId: string, month: string):
          WHERE user_id = ? AND deleted_at IS NULL AND currency <> ? AND expense_date >= ? AND expense_date < ?
          GROUP BY currency ORDER BY currency`,
       )
-      .bind(userId, BASE_CURRENCY, start, end),
+      .bind(userId, currency, start, end),
   ]);
   const byCategory = new Map<string, number>();
   for (const r of [...exp!.results, ...legacy!.results]) {
@@ -85,6 +84,8 @@ export interface BudgetRow {
 
 export interface BudgetStatus {
   month: string;
+  /** The account currency every amount here is in (D45). */
+  currency: string;
   has_data: boolean;
   rows: BudgetRow[];
   total: {
@@ -102,16 +103,17 @@ export interface BudgetStatus {
   legacy_total: number;
 }
 
-export async function budgetStatus(db: D1Database, userId: string, month: string): Promise<BudgetStatus> {
+export async function budgetStatus(db: D1Database, userId: string, month: string, currency?: string): Promise<BudgetStatus> {
   await ensureBudgets(db, userId, month);
+  currency ??= await accountCurrency(db, userId);
   const [cats, budgets, cur, prev, review] = await Promise.all([
     userCategories(db, userId, { includeInactive: true }),
     db
       .prepare("SELECT category, amount FROM budgets WHERE user_id = ? AND month = ?")
       .bind(userId, month)
       .all<{ category: string; amount: number | null }>(),
-    monthSpend(db, userId, month),
-    monthSpend(db, userId, addMonths(month, -1)),
+    monthSpend(db, userId, month, currency),
+    monthSpend(db, userId, addMonths(month, -1), currency),
     db
       .prepare(
         `SELECT COUNT(*) AS n FROM expenses WHERE user_id = ? AND deleted_at IS NULL AND needs_review = 1
@@ -153,6 +155,7 @@ export async function budgetStatus(db: D1Database, userId: string, month: string
   const spent = round2(rows.reduce((s, r) => s + r.spent, 0));
   return {
     month,
+    currency,
     has_data: cur.hasExpenses || cur.hasLegacy,
     rows,
     total: {
@@ -192,7 +195,7 @@ export const budgetStatusTool = defineTool({
     "Budget table for one month: per category budget, spent, remaining, previous month spent and % used, plus a total. Use it for questions like 'how am I doing on my budget?'.",
   input: z.object({ month: MonthInput }),
   async run(ctx, input) {
-    return budgetStatus(ctx.db, ctx.userId, input.month ?? monthOf(today(ctx)));
+    return budgetStatus(ctx.db, ctx.userId, input.month ?? monthOf(today(ctx)), await currencyOf(ctx));
   },
 });
 
@@ -231,7 +234,7 @@ export async function setBudget(
     stmts.push(ctx.db.prepare("UPDATE budgets SET amount = ? WHERE user_id = ? AND category = ? AND month > ?").bind(amount, ctx.userId, category, month));
   }
   const res = await ctx.db.batch(stmts);
-  const status = await budgetStatus(ctx.db, ctx.userId, month);
+  const status = await budgetStatus(ctx.db, ctx.userId, month, await currencyOf(ctx));
   const row = status.rows.find((r) => r.category === category)!;
   return {
     category,

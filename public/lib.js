@@ -17,7 +17,8 @@ export function el(tag, attrs = {}, ...children) {
 }
 
 export const fmt = (n) => (n === null || n === undefined ? "-" : Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 }));
-export const money = (n, currency = "EGP") => `${fmt(n)}${currency && currency !== "EGP" ? " " + currency : ""}`;
+/** Amount with its code shown only when it isn't the account currency (D45). */
+export const money = (n, currency) => `${fmt(n)}${currency && currency !== state.currency ? " " + currency : ""}`;
 export const newId = () =>
   (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
 
@@ -37,7 +38,7 @@ export const lastDayOf = (m) => {
 };
 
 // ---------- shared state ----------
-export const state = { categories: [] };
+export const state = { categories: [], currency: "EGP" };
 export const catName = (key) => state.categories.find((c) => c.key === key)?.display_name ?? key;
 
 const listeners = new Set();

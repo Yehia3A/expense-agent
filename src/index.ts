@@ -7,10 +7,11 @@ import { handleAuth } from "./security/account";
 import { accessGate, type Identity, identify } from "./security/auth";
 import { checkLimits, type Limit } from "./security/ratelimit";
 import { handleTranscribe } from "./voice/transcribe";
-import { addExpenses, ItemInput, recentExpenses } from "./tools/expenses";
+import { addExpenses, ItemInput, quickItems, recentExpenses } from "./tools/expenses";
 import { callTool, type ToolOutcome } from "./tools/registry";
 import { budgetStatus } from "./tools/budgets";
 import { MAX_CATEGORIES, needsSetup, OTHER_KEY, PRESETS, saveCategories, userCategories } from "./tools/categories";
+import { accountCurrency, currencyOf, setAccountCurrency } from "./tools/currency";
 import type { ToolContext } from "./tools/types";
 import { isValidMonth, localDate, monthOf } from "./lib/dates";
 
@@ -98,16 +99,19 @@ const CategoriesRequest = z.object({
     .array(z.object({ key: z.string().max(40).optional(), name: z.string().max(60), budget: z.number().min(0).max(100_000_000).nullable().optional() }))
     .max(20),
   other_budget: z.number().min(0).max(100_000_000).nullable().optional(),
+  currency: z.string().optional(),
   month: z.string().refine(isValidMonth, "month must be YYYY-MM").optional(),
 });
 
 async function categoriesPayload(ctx: ToolContext) {
   const month = monthOf(localDate(ctx.now(), ctx.config.tz));
-  const [cats, status] = await Promise.all([userCategories(ctx.db, ctx.userId), budgetStatus(ctx.db, ctx.userId, month)]);
+  const currency = await currencyOf(ctx);
+  const [cats, status] = await Promise.all([userCategories(ctx.db, ctx.userId), budgetStatus(ctx.db, ctx.userId, month, currency)]);
   const budget = new Map(status.rows.map((r) => [r.category, r.budget]));
   return {
     month,
     max: MAX_CATEGORIES,
+    currency,
     needs_setup: await needsSetup(ctx.db, ctx.userId),
     categories: cats.map((c) => ({ key: c.key, name: c.name, budget: budget.get(c.key) ?? null, is_other: c.key === OTHER_KEY })),
     presets: PRESETS,
@@ -134,11 +138,26 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
     const parsed = CategoriesRequest.safeParse(await body(req));
     if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
     const ctx = apiCtx(env, uid);
+    if (parsed.data.currency !== undefined) {
+      const c = await setAccountCurrency(env.DB, uid, parsed.data.currency);
+      if (!c.ok) return fail(400, c.error);
+    }
     const r = await saveCategories(ctx, parsed.data.categories, parsed.data.other_budget, parsed.data.month);
     await logApi(env, uid, ctx.requestId, "save_categories", parsed.data, r, started, r.ok ? undefined : r.error);
     if (!r.ok) return fail(400, r.error);
     return json(await categoriesPayload(ctx));
   }
+
+  // The account currency (D45). Changing it relabels, never converts.
+  if (path === "/api/settings" && method === "GET") return json({ currency: await accountCurrency(env.DB, uid) });
+  if (path === "/api/settings" && method === "PUT") {
+    const b = (await body(req)) as { currency?: unknown } | undefined;
+    const r = await setAccountCurrency(env.DB, uid, b?.currency);
+    if (!r.ok) return fail(400, r.error);
+    return json(r);
+  }
+
+  if (path === "/api/quick" && method === "GET") return json(await quickItems(apiCtx(env, uid)));
 
   if (path === "/api/expenses/recent" && method === "GET") {
     const limit = Math.min(Math.max(Number(q.limit) || 20, 1), 200);

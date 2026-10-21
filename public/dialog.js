@@ -1,6 +1,7 @@
 // In-page dialogs that replace the browser's confirm()/prompt() boxes:
 // centered card, dimmed backdrop, Esc or a click outside cancels, focus stays inside.
 import { renderCategoryEditor } from "./categories.js";
+import { currencyName, currencyPicker } from "./currency.js";
 import { api, el, toast } from "./lib.js";
 
 const dlg = document.getElementById("dialog");
@@ -239,4 +240,52 @@ export function categoriesDialog(payload, onSaved) {
       onSaved(saved);
     },
   });
+}
+
+/** Change the account currency (D45). Amounts are relabelled, never converted. */
+export function currencyDialog(current, onSaved) {
+  let picked = current;
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const save = el("button", { type: "submit" }, "Save");
+  const cancel = el("button", { type: "button", class: "ghost" }, "Cancel");
+  const note = el("p", { class: "muted small cur-note", hidden: true });
+  const picker = currencyPicker(current, (c) => {
+    picked = c;
+    error.hidden = true;
+    note.hidden = !c || c === current;
+    if (c) note.textContent = `Amounts aren't converted: what you recorded in ${current} will show as ${c}.`;
+  });
+  const form = el(
+    "form",
+    { class: "dialog-card", novalidate: true },
+    icon("info"),
+    el("h2", { class: "dialog-title" }, "Currency"),
+    el("p", { class: "dialog-text" }, `Budgets and totals are in ${current} (${currencyName(current)}). You can still log an expense in another currency by naming it, like "taxi 20 ${current === "USD" ? "EUR" : "USD"}"; it's kept but not added to your totals.`),
+    picker,
+    note,
+    error,
+    el("div", { class: "dialog-actions" }, cancel, save),
+  );
+  cancel.addEventListener("click", () => dlg.close("cancel"));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fail = (msg) => {
+      error.textContent = msg;
+      error.hidden = false;
+    };
+    if (!picked) return fail("Pick a currency, or type a valid 3-letter code like USD.");
+    if (picked === current) return dlg.close("cancel");
+    save.disabled = true;
+    try {
+      const r = await api("/api/settings", { method: "PUT", body: { currency: picked } });
+      dlg.close("ok");
+      onSaved(r.currency);
+    } catch (err) {
+      fail(err.message);
+    } finally {
+      save.disabled = false;
+    }
+  });
+  open(form);
+  form.querySelector("select").focus();
 }

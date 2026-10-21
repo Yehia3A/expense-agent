@@ -6,6 +6,8 @@
 - History starts at sign-up (plus the month before), and earlier only where there are records.
 - Voice input with Groq Whisper (free), auto-stop on silence; driving mode with one huge button, a cancellable auto-send countdown and the screen kept on.
 - `list_categories` tool for MCP clients.
+- Quick log: one-tap buttons for your 5 most common entries, with your last amount.
+- Pick your currency (30 main ones or any ISO code) in setup, the account menu or Edit categories; budgets and totals use it (migration 0009).
 
 ## 0.7.0 (2026-10-20): Open to everyone
 

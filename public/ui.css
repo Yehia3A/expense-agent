@@ -5,7 +5,7 @@
 body { min-height: 100vh; transition: background-color 0.2s ease; }
 input, select { background: var(--input-bg); }
 input:focus, select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
-button:not(.ghost):not(.icon-btn):not(.icon-round):not(.pw-toggle):not(.user-btn):not([role="menuitem"]):not([role="tab"]):not(.mic-btn):not(.drive-mic):not(.drive-open):not(.drive-exit):not(.cancel):not(.chip):hover:not(:disabled) {
+button:not(.ghost):not(.icon-btn):not(.icon-round):not(.pw-toggle):not(.user-btn):not([role="menuitem"]):not([role="tab"]):not(.mic-btn):not(.drive-mic):not(.drive-open):not(.drive-exit):not(.cancel):not(.chip):not(.quick-btn):hover:not(:disabled) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
 }
@@ -328,3 +328,25 @@ body.driving { overflow: hidden; }
 }
 
 .dialog:focus, .dialog:focus-visible { outline: none; }
+
+/* =================== Quick log =================== */
+.quick { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 2px; scrollbar-width: none; border-top: 1px solid var(--line); }
+.quick::-webkit-scrollbar { display: none; }
+.quick + .composer { border-top: none; padding-top: 8px; }
+.quick-btn {
+  flex: none; display: inline-flex; align-items: baseline; gap: 6px; min-height: 40px; padding: 8px 14px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); font-weight: 600;
+  touch-action: manipulation;
+}
+.quick-btn:hover:not(:disabled) { border-color: var(--accent); }
+.quick-btn:active { transform: scale(0.97); }
+.quick-amt { color: var(--accent-strong); font-variant-numeric: tabular-nums; font-size: 13px; }
+
+/* ---------- currency picker (D45) ---------- */
+.cur-picker { display: grid; gap: 6px; text-align: left; }
+.cur-label { font-size: 13px; font-weight: 600; }
+.cur-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cur-select { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border-radius: 10px; font-size: 15px; }
+.cur-other { flex: 0 0 120px; padding: 10px 12px; border-radius: 10px; font-size: 15px; text-transform: uppercase; }
+.cur-hint:empty { display: none; }
+.cur-note { margin: 0; text-align: left; }

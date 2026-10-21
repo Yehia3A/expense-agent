@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { addDays, addMonths, daysBetween, isValidMonth, isValidYmd, localDate, monthOf, monthRange } from "../lib/dates";
-import { BASE_CURRENCY, budgetStatus } from "./budgets";
+import { budgetStatus } from "./budgets";
+import { currencyOf } from "./currency";
 import { userCategories } from "./categories";
 import { summarizeTool } from "./reports";
 import { defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
@@ -31,9 +32,9 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
   const isCurrent = month === current;
   const daysElapsed = isCurrent ? Number(t.slice(8, 10)) : daysInMonth;
 
-  const status = await budgetStatus(ctx.db, ctx.userId, month);
+  const status = await budgetStatus(ctx.db, ctx.userId, month, await currencyOf(ctx));
   const live = "user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?";
-  const args = [ctx.userId, BASE_CURRENCY, start, end];
+  const args = [ctx.userId, await currencyOf(ctx), start, end];
   const [topRows, items, days, review] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db.prepare(`SELECT * FROM expenses WHERE ${live} ORDER BY amount DESC, expense_date DESC LIMIT 5`).bind(...args),
     ctx.db
@@ -153,7 +154,7 @@ export async function monthlyHistory(ctx: ToolContext, endMonth: string, maxMont
          WHERE user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?
          GROUP BY month, category`,
       )
-      .bind(ctx.userId, BASE_CURRENCY, from, to),
+      .bind(ctx.userId, await currencyOf(ctx), from, to),
     ctx.db
       .prepare("SELECT month, category, amount AS total FROM legacy_monthly_totals WHERE user_id = ? AND month >= ? AND month <= ?")
       .bind(ctx.userId, oldest, endMonth),
@@ -241,7 +242,7 @@ export const topSpendingTool = defineTool({
       start_date: input.start_date,
       end_date: input.end_date,
       by: input.by,
-      currency: BASE_CURRENCY,
+      currency: await currencyOf(ctx),
       total: s.total,
       ranked: s.groups.slice(0, input.limit).map((g, i) => ({ rank: i + 1, ...g })),
       legacy_total_included: s.legacy_total_included,

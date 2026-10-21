@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { addDays, addMonths, isValidYmd, monthOf, monthStart } from "../lib/dates";
-import { BASE_CURRENCY } from "./budgets";
+import { currencyOf } from "./currency";
 import { resolveCategory } from "./categories";
 import { CategoryInput, defineTool, today, ToolError } from "./types";
 
@@ -44,7 +44,7 @@ export const summarizeTool = defineTool({
 
     let sql = `SELECT ${keyExpr} AS key, SUM(amount) AS total, COUNT(*) AS count FROM expenses
                WHERE user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?`;
-    const args: unknown[] = [ctx.userId, BASE_CURRENCY, input.start_date, endExclusive];
+    const args: unknown[] = [ctx.userId, await currencyOf(ctx), input.start_date, endExclusive];
     if (category) {
       sql += " AND category = ?";
       args.push(category);
@@ -84,7 +84,7 @@ export const summarizeTool = defineTool({
       start_date: input.start_date,
       end_date: input.end_date,
       group_by: input.group_by,
-      currency: BASE_CURRENCY,
+      currency: await currencyOf(ctx),
       total,
       groups: sorted.map((g) => ({ ...g, share_pct: total > 0 ? Math.round((1000 * g.total) / total) / 10 : 0 })),
       legacy_total_included: round2(legacyIncluded),

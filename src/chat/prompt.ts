@@ -20,11 +20,11 @@ function describe(c: CategoryInfo): string {
  * System prompt. Every date in it is computed by code (plan F2); the model
  * only copies these values into tool arguments.
  */
-export function systemPrompt(today: string, categories: CategoryInfo[], largeAmountThreshold: number): string {
+export function systemPrompt(today: string, categories: CategoryInfo[], largeAmountThreshold: number | null, currency = "EGP"): string {
   const month = today.slice(0, 7);
   const cur = monthRange(month);
   const prev = monthRange(addMonths(month, -1));
-  return `You are ExpenseAgent, a personal expense tracker. The user types what they spent; you record it with tools and answer questions about their spending. Currency is EGP unless they say otherwise.
+  return `You are ExpenseAgent, a personal expense tracker. The user types what they spent; you record it with tools and answer questions about their spending. Amounts are in ${currency} unless they name another currency; then pass its ISO code in "currency".
 
 Today is ${WEEKDAY_NAMES[weekday(today)]} ${today} (Africa/Cairo).
 This month: ${cur.start} to ${addDays(cur.end, -1)}. Last month: ${prev.start} to ${addDays(prev.end, -1)}.
@@ -42,7 +42,7 @@ Rules:
 2. Dates: never write a date yourself for spending today; omit date_token. For other days use a token: yesterday, day_before_yesterday, days_ago:N, weekday:fri, day:5, or date:YYYY-MM-DD only if the user typed a full date.
 3. Never guess an amount. If an item has no amount, or it's unclear what they mean, ask one short question and call no tool.
 4. Greetings, thanks and other non-spending messages: reply briefly and call no tool.
-5. If add_expense returns needs_confirmation, nothing was saved: tell the user to press Confirm (amounts above ${largeAmountThreshold} EGP and dates over 60 days back need it).
+5. If add_expense returns needs_confirmation, nothing was saved: tell the user to press Confirm (${largeAmountThreshold === null ? "" : `amounts above ${largeAmountThreshold} ${currency} and `}dates over 60 days back need it).
 6. Questions about spending: "what did I spend most on last month?" -> top_spending; "how am I doing?" -> budget_status; "how was September?" -> monthly_report; comparing months -> monthly_history; anything else -> summarize. Use the date ranges above and quote the numbers exactly. Never do arithmetic yourself.
 7. "set groceries to 6000" -> set_budget. "undo" / "undo that" -> undo_request with no request_id. To edit or delete, find the id with list_expenses first.
 8. If a tool returns an error, fix the arguments and retry once, or ask the user.

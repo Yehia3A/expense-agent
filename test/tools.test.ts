@@ -93,10 +93,12 @@ describe("add_expense", () => {
     expect(r.status).toBe("needs_confirmation");
   });
 
-  it("does not convert other currencies and does not threshold them", async () => {
-    const r = await addExpenses(makeCtx(), [{ amount: 9000, currency: "usd", category: "shopping", note: "laptop" }]);
+  it("does not convert other currencies, and uses each currency's own large-amount limit (D45)", async () => {
+    const r = await addExpenses(makeCtx(), [{ amount: 450, currency: "usd", category: "shopping", note: "laptop" }]);
     expect(r.status === "saved" && r.saved[0]!.currency).toBe("USD");
-    expect(r.status === "saved" && r.status_lines[0]).toBe("Added laptop 9000 USD. Shopping: 0 spent this month (no budget set).");
+    expect(r.status === "saved" && r.status_lines[0]).toBe("Added laptop 450 USD. Shopping: 0 spent this month (no budget set).");
+    const big = await addExpenses(makeCtx({ requestId: "big-usd" }), [{ amount: 9000, currency: "usd", category: "shopping", note: "laptop" }]);
+    expect(big.status).toBe("needs_confirmation");
   });
 
   it("flags 'other' for review (D1)", async () => {

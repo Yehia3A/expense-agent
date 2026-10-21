@@ -170,7 +170,7 @@ export function renderBudgetTable(table, s, { editable = false, onEdit } = {}) {
     el(
       "tr",
       {},
-      el("td", {}, "TOTAL"),
+      el("td", {}, s.currency ? `TOTAL (${s.currency})` : "TOTAL"),
       el("td", { class: "num" }, fmt(t.budget)),
       el("td", { class: "num" }, fmt(t.spent)),
       el("td", { class: `num ${t.remaining < 0 ? "neg" : ""}` }, t.remaining < 0 ? `(${fmt(-t.remaining)})` : fmt(t.remaining)),
@@ -252,8 +252,56 @@ export function initTrack() {
   monthInput.addEventListener("change", () => loadBudget().catch((err) => toast(err.message)));
 }
 
+// ---------- quick log (D44) ----------
+async function loadQuick() {
+  const items = await api("/api/quick");
+  const box = $("#quick");
+  box.replaceChildren(
+    ...items.map((it) => {
+      const btn = el(
+        "button",
+        { type: "button", class: "quick-btn", title: `Log ${it.note} ${fmt(it.amount)} in ${it.category_name} again`, "aria-label": `Log ${it.note}, ${fmt(it.amount)}, again` },
+        el("span", { class: "quick-note" }, it.note),
+        el("span", { class: "quick-amt" }, fmt(it.amount)),
+      );
+      btn.addEventListener("click", () => quickLog(it, btn));
+      return btn;
+    }),
+  );
+  box.hidden = items.length === 0;
+}
+
+/** One tap: save the item again with its usual amount and category, no AI involved. */
+async function quickLog(it, btn) {
+  btn.disabled = true;
+  $(".hint")?.remove();
+  addBubble("user", `${it.note} ${it.amount}`);
+  const request_id = newId();
+  try {
+    const r = await api("/api/expenses", {
+      method: "POST",
+      body: { request_id, items: [{ note: it.note, amount: it.amount, category: it.category }] },
+    });
+    renderReply({
+      request_id,
+      reply: r.status === "saved" ? "Saved." : "That needs confirmation: press Confirm to save it.",
+      saved: r.saved ?? [],
+      status_lines: r.status_lines ?? [],
+      pending:
+        r.status === "needs_confirmation"
+          ? { request_id: `${request_id}:confirm`, items: r.items.map((i) => ({ ...i, date_token: `date:${i.expense_date}` })) }
+          : null,
+    });
+    if (r.status === "saved") dataChanged();
+  } catch (err) {
+    addBubble("bot error", err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 export function loadTrack() {
-  return Promise.all([loadBudget(), loadRecent()]);
+  return Promise.all([loadBudget(), loadRecent(), loadQuick()]);
 }
 
 export const focusChat = () => input.focus();

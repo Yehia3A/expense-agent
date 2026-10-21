@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { addDays, checkExpenseDate, isValidYmd, monthOf, resolveDateToken } from "../lib/dates";
 import { ulid } from "../lib/ulid";
-import { BASE_CURRENCY, budgetStatus, type BudgetRow, statusLine } from "./budgets";
+import { budgetStatus, type BudgetRow, statusLine } from "./budgets";
+import { currencyOf, largeAmountFor } from "./currency";
 import { learnStatements } from "./merchants";
 import { resolveCategory } from "./categories";
 import { CategoryInput, type CategoryKey, defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
@@ -20,7 +21,7 @@ const Note = z.string().trim().min(1).max(200);
 
 export const ItemInput = z.object({
   amount: Amount.describe("Amount as a positive number. Never guess: ask if the user did not give one."),
-  currency: Currency.optional().describe("ISO code. Omit for EGP."),
+  currency: Currency.optional().describe("ISO code. Omit for the account currency."),
   category: CategoryInput.describe("A category key from the list in the system prompt."),
   note: Note.describe("Short description in the user's words, e.g. 'coffee', 'vegs'."),
   date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
@@ -53,7 +54,8 @@ async function getRow(ctx: ToolContext, id: string): Promise<ExpenseRow | null> 
 /** Budget status for each (category, month) touched, plus one human status line per saved row. */
 async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "expense_date" | "note" | "amount" | "currency">[]) {
   const months = [...new Set(rows.map((r) => monthOf(r.expense_date)))];
-  const byMonth = new Map(await Promise.all(months.map(async (m) => [m, await budgetStatus(ctx.db, ctx.userId, m)] as const)));
+  const home = await currencyOf(ctx);
+  const byMonth = new Map(await Promise.all(months.map(async (m) => [m, await budgetStatus(ctx.db, ctx.userId, m, home)] as const)));
   const affected: (BudgetRow & { month: string })[] = [];
   const seen = new Set<string>();
   const lines = rows.map((r) => {
@@ -64,7 +66,7 @@ async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "e
       seen.add(key);
       affected.push({ ...status, month: m });
     }
-    const cur = r.currency === BASE_CURRENCY ? "" : ` ${r.currency}`;
+    const cur = r.currency === home ? "" : ` ${r.currency}`;
     const when = r.expense_date === today(ctx) ? "" : ` on ${r.expense_date}`;
     return `Added ${r.note} ${r.amount}${cur}${when}. ${statusLine(status)}`;
   });
@@ -82,6 +84,7 @@ export type AddResult =
  */
 export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirmed = false): Promise<AddResult> {
   const t = today(ctx);
+  const home = await currencyOf(ctx);
   const errors: string[] = [];
   const resolved: (ResolvedItem & { reasons: string[] })[] = [];
 
@@ -105,10 +108,9 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
     const check = checkExpenseDate(d.date, t, ctx.config.oldDateConfirmDays);
     if (!check.ok) return void errors.push(`${label}: ${check.error}`);
     const reasons: string[] = [];
-    const currency = (item.currency ?? BASE_CURRENCY).toUpperCase();
-    if (currency === BASE_CURRENCY && item.amount > ctx.config.largeAmountThreshold) {
-      reasons.push(`amount ${item.amount} is above ${ctx.config.largeAmountThreshold} ${BASE_CURRENCY}`);
-    }
+    const currency = (item.currency ?? home).toUpperCase();
+    const large = largeAmountFor(currency, ctx.config);
+    if (large !== null && item.amount > large) reasons.push(`amount ${item.amount} is above ${large} ${currency}`);
     if (check.old) reasons.push(`date ${d.date} is more than ${ctx.config.oldDateConfirmDays} days ago`);
     resolved.push({ amount: item.amount, currency, category, note: item.note, expense_date: d.date, reasons });
   });
@@ -211,6 +213,43 @@ export const recentExpenses = async (ctx: ToolContext, limit: number) =>
       .bind(ctx.userId, limit)
       .all<ExpenseRow>()
   ).results;
+
+export interface QuickItem {
+  note: string;
+  amount: number;
+  category: string;
+  category_name: string;
+  count: number;
+}
+
+/**
+ * Quick log (D44): the user's most frequent items of the last 90 days (at
+ * least twice), each with the amount they paid last time, in a category that
+ * is still in use. One tap logs it again.
+ */
+export async function quickItems(ctx: ToolContext, limit = 5): Promise<QuickItem[]> {
+  const since = addDays(today(ctx), -90);
+  return (
+    await ctx.db
+      .prepare(
+        `SELECT q.item AS note, q.category, q.n AS count,
+                COALESCE(c.name, CASE WHEN q.category = 'other' THEN 'Other' END) AS category_name,
+                (SELECT e2.amount FROM expenses e2
+                  WHERE e2.user_id = ?1 AND e2.deleted_at IS NULL AND e2.category = q.category AND lower(trim(e2.note)) = q.item
+                  ORDER BY e2.created_at DESC, e2.id DESC LIMIT 1) AS amount
+         FROM (SELECT lower(trim(note)) AS item, category, COUNT(*) AS n, MAX(created_at) AS last
+               FROM expenses
+               WHERE user_id = ?1 AND deleted_at IS NULL AND currency = ?4 AND expense_date >= ?2
+               GROUP BY item, category HAVING n >= 2) q
+         LEFT JOIN user_categories c ON c.user_id = ?1 AND c.key = q.category
+         WHERE (c.is_active = 1 OR (c.key IS NULL AND q.category = 'other'))
+         ORDER BY q.n DESC, q.last DESC
+         LIMIT ?3`,
+      )
+      .bind(ctx.userId, since, limit, await currencyOf(ctx))
+      .all<QuickItem>()
+  ).results;
+}
 
 export const UpdateFields = z
   .object({

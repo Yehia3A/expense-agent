@@ -1,6 +1,6 @@
 // History view (plan 10.2): trailing 12-month table, then one month's
 // remaining-by-category (its own budgets) and its transactions.
-import { $, api, cairoToday, el, expenseRow, fillMonthSelect, fmt, lastDayOf, monthLabel } from "./lib.js";
+import { $, api, cairoToday, el, expenseRow, fillMonthSelect, fmt, lastDayOf, monthLabel, state } from "./lib.js";
 import { renderBudgetTable } from "./track.js";
 
 const select = $("#hist-month");
@@ -55,7 +55,7 @@ async function loadMonth() {
 
   const rows = list.expenses;
   $("#hist-tx tbody").replaceChildren(...rows.map(expenseRow));
-  const txTotal = rows.filter((r) => r.currency === "EGP").reduce((s, r) => s + r.amount, 0);
+  const txTotal = rows.filter((r) => r.currency === state.currency).reduce((s, r) => s + r.amount, 0);
   $("#hist-tx tfoot").replaceChildren(
     el("tr", {}, el("td", { colspan: "3" }, `Total (${rows.length} transaction${rows.length === 1 ? "" : "s"})`), el("td", { class: "num" }, fmt(Math.round(txTotal * 100) / 100)), el("td")),
   );

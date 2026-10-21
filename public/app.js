@@ -3,7 +3,8 @@
 // History views (#track, #report, #history).
 import { getMe, showWelcome, signOut } from "./auth.js";
 import { renderCategoryEditor } from "./categories.js";
-import { apiTokenDialog, categoriesDialog, changePasswordDialog, deleteAccountDialog } from "./dialog.js";
+import { guessCurrency } from "./currency.js";
+import { apiTokenDialog, categoriesDialog, changePasswordDialog, currencyDialog, deleteAccountDialog } from "./dialog.js";
 import { initHistory, loadHistory } from "./history.js";
 import { $, api, cairoToday, dataChanged, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
 import { initReport, loadReport, refreshReportMonths } from "./report.js";
@@ -78,6 +79,14 @@ function wireUserMenu(username) {
     const me = await getMe().catch(() => null);
     apiTokenDialog(me?.api_token ?? null);
   });
+  $("#menu-currency").addEventListener("click", () => {
+    close();
+    currencyDialog(state.currency, (c) => {
+      state.currency = c;
+      toast(`Currency set to ${c}.`, "ok");
+      dataChanged();
+    });
+  });
   $("#menu-signout").addEventListener("click", () => {
     close();
     signOut();
@@ -91,6 +100,7 @@ function wireUserMenu(username) {
 /** Keep the shared category list (pickers, names in tables) in step with the account's categories. */
 function useCategories(payload) {
   state.categories = payload.categories.map((c) => ({ key: c.key, display_name: c.name }));
+  if (payload.currency) state.currency = payload.currency;
 }
 
 /** First time only: pick categories and budgets before the app opens (D41). */
@@ -100,7 +110,8 @@ function runSetup(payload) {
     $("#welcome").hidden = true;
     $("#app").hidden = true;
     $("#setup").hidden = false;
-    renderCategoryEditor($("#setup-editor"), payload, {
+    // First pick for the currency comes from the device's time zone (D45).
+    renderCategoryEditor($("#setup-editor"), { ...payload, initialCurrency: guessCurrency(payload.currency) }, {
       submitLabel: "Start tracking",
       onSaved: (saved) => {
         $("#setup").hidden = true;

@@ -131,7 +131,7 @@ Results land in [eval/RESULTS.md](eval/RESULTS.md). The fast-path-only run (no m
 | `LLM_FALLBACK_MODEL` | vars | `llama-3.1-8b-instant` (used after a 429) |
 | `LLM_BASE_URL` | vars or `.dev.vars` | derived from the provider |
 | `FAST_PATH` | vars | `on` (`off` sends everything to the model) |
-| `LARGE_AMOUNT_THRESHOLD`, `OLD_DATE_CONFIRM_DAYS` | vars | `5000` EGP, `60` days |
+| `LARGE_AMOUNT_THRESHOLD`, `OLD_DATE_CONFIRM_DAYS` | vars | `5000` (EGP accounts; other currencies use a built-in limit of about 500 USD, D45), `60` days |
 | `SIGNUP_OPEN` | vars | `on` (`off` closes new sign-ups) |
 | `LLM_RATE_PER_DAY` | vars | `800` model messages a day, all accounts together |
 | `CHAT_RATE_PER_MIN`, `CHAT_RATE_PER_DAY`, `API_RATE_PER_MIN` | vars | `20`, `200`, `300` per account (0 disables) |

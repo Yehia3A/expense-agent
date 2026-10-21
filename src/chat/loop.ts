@@ -10,6 +10,7 @@ import type { ExpenseRow, ToolContext } from "../tools/types";
 import { fastPath } from "./fastpath";
 import { type ChatMessage, complete, LlmError, llmConfig, type Usage } from "./llm";
 import { systemPrompt } from "./prompt";
+import { currencyOf, largeAmountFor } from "../tools/currency";
 
 export const MAX_ITERATIONS = 6;
 export const DEADLINE_MS = 25_000;
@@ -210,8 +211,9 @@ async function runLlm(
     hint: hintFor(c.key),
     examples: examples.get(c.key),
   }));
+  const currency = await currencyOf(ctx);
   const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, ctx.config.largeAmountThreshold) },
+    { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, largeAmountFor(currency, ctx.config), currency) },
     ...req.history,
     { role: "user", content: req.message },
   ];
