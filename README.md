@@ -1,14 +1,38 @@
 # ExpenseAgent
 
-A free expense tracker anyone can use. Create an account with just a username and a password, then type `coffee 200, vegs 400`: it records both items with today's date (Cairo time), files them under the right categories, and shows how much of each budget you've used. Monthly reports and a 12-month history replace spreadsheets. Every account's data is private to that account, and the same tools work from MCP clients such as Claude Desktop or Claude Code.
+A free expense tracker anyone can use. Create an account with just a username and a password, then type `coffee 200, vegs 400`: it records both items with today's date in your city's time zone, files them under the right categories, and shows how much of each budget you've used. Monthly reports and a month-by-month history replace spreadsheets. Every account's data is private to that account, and the same tools work from MCP clients such as Claude Desktop or Claude Code.
 
 Runs entirely on Cloudflare's free plan (Workers + D1) with a free Groq model: **$0 a month, nothing running on your laptop.**
+
+## Live app
+
+**https://expense-agent.let-apps.workers.dev**: open to anyone; sign up with a username and password.
+
+| Part | Where it runs |
+|---|---|
+| App (UI, `/api`, `/chat`, `/mcp`) | Cloudflare Worker `expense-agent` on the `let-apps.workers.dev` subdomain, free Workers plan. The UI in `public/` is served by the same Worker (Workers Static Assets). |
+| Database | Cloudflare D1 (SQLite) database `expense_agent`; its id is in `wrangler.jsonc`. Schema changes are the numbered files in `migrations/`. |
+| AI | Groq API: `openai/gpt-oss-120b` for chat, `llama-3.1-8b-instant` as the fallback, `whisper-large-v3-turbo` for voice. The key is the Worker secret `LLM_API_KEY`, never in the repo. |
+| Code | This GitHub repository (private). |
+
+**How a change goes live.** Pushing to GitHub doesn't change the live app by itself. Either:
+
+- **From your computer** (how it's done today): new database migrations first, then the code. On Windows PowerShell use `npm.cmd` / `npx.cmd`.
+  ```bash
+  npm run db:migrate:remote
+  ```
+  ```bash
+  npm run deploy
+  ```
+- **Automatically from GitHub:** add the repository secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers" plus D1 Edit) and `CLOUDFLARE_ACCOUNT_ID` under Settings → Secrets and variables → Actions. From then on every push to `main` runs the typecheck and tests, applies migrations and deploys ([.github/workflows/deploy.yml](.github/workflows/deploy.yml)). Without those secrets, pushes only run the tests.
+
+Cloudflare's dashboard (Workers & Pages → `expense-agent`) shows each deployed version and can roll back to an earlier one.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-  B["Browser UI<br/>Welcome · Track · Report · History"] -->|same origin| W
+  B["Browser UI<br/>Welcome · Setup · Track · Report · History"] -->|same origin| W
   M["MCP clients<br/>Claude Desktop / Code, scripts"] -->|"/mcp + personal API token"| W
   subgraph W["Worker (src/index.ts)"]
     G["Who is calling?<br/>session cookie or personal API token<br/>CSRF guard · per-account rate limits"]
@@ -23,16 +47,20 @@ flowchart TD
     X --> T
     T["One tool layer (src/tools), every query scoped to the account<br/>add · list · update · delete · undo · summarize<br/>budget_status · set_budget · monthly_report<br/>top_spending · monthly_history"]
   end
-  T --> D[("D1 (SQLite)<br/>users · sessions · api_tokens<br/>expenses · budgets · legacy totals · merchant_map<br/>logs · rate_limits")]
+  T --> D[("D1 (SQLite)<br/>users · sessions · api_tokens · user_categories<br/>expenses · budgets · legacy totals · merchant_map<br/>logs · rate_limits")]
 ```
 
-**Your own budget:** after sign-up you pick up to 10 categories, from suggestions like Groceries or Investments & Savings or written in your own words, each with a monthly budget, plus an automatic Other. You can edit them any time. History starts when your account did.
+**Your own budget:** after sign-up you pick your city, your currency and up to 10 categories, from suggestions like Groceries or Investments & Savings or written in your own words, each with a monthly budget, plus an automatic Other. You can edit them any time. History starts when your account did. Categorizing learns from what you file where, so a "Healthy snacks" category catches protein bars and greek yogurt.
+
+**City and currency:** type your city and pick it from about 7,300 cities; "today" and months follow its time zone. Pick a currency from 30 main ones or type any ISO code. Budgets and totals are in that currency; an expense in another currency (`taxi 20 USD`) is kept but not added to totals. Changing currency relabels, it never converts. Both are in the account menu.
+
+**Quick log:** the 5 things you log most appear as one-tap buttons above the chat box, with the amount you paid last time. A tap saves it without the AI, with Undo.
 
 **Voice and driving mode:** tap the mic next to Send and speak; it stops by itself when you stop talking and puts the text in the box. **Driving mode** is one huge button: tap, speak, and the expense is sent after a 3-second countdown you can cancel, with the screen kept on. Both are free (Groq Whisper) and work in every browser, including Brave and iPhone Safari.
 
 **Accounts:** anyone can sign up with a username and password; no email. Sessions last 30 days and slide with use, and browser password autofill works. Every expense, budget, learned word and log row belongs to one account, and every query is limited to the signed-in account. Tests prove one account can't read, edit, delete, undo or replay another's data, even knowing its ids. Each account can create a personal API token for MCP clients. Dark mode is the default, with a light-mode switch.
 
-**Rules that keep the numbers right:** the model never writes a date, a total or a percentage. It picks a tool and fills in amount, category, note and a relative `date_token` (`yesterday`, `weekday:fri`). Code turns that into a Cairo calendar date. Every number on screen comes from SQL. Large amounts and old dates wait for a Confirm click. Every write is idempotent on its request id, and undo works for a whole message.
+**Rules that keep the numbers right:** the model never writes a date, a total or a percentage. It picks a tool and fills in amount, category, note and a relative `date_token` (`yesterday`, `weekday:fri`). Code turns that into a calendar date in the account's time zone. Every number on screen comes from SQL. Large amounts and old dates wait for a Confirm click. Every write is idempotent on its request id, and undo works for a whole message.
 
 ## Status
 
@@ -40,10 +68,11 @@ flowchart TD
 |---|---|
 | 0–2. Setup, core tools, chat + MVP UI | Done |
 | 3. Security | Done: sign-in with hashed passwords and sessions, per-account API tokens, rate limits, CSRF guard, CSP ([docs/SECURITY.md](docs/SECURITY.md)). |
-| 4. Reports + History | Done: report with charts, 12-month history, month detail; reconciled against the budget table. |
+| 4. Reports + History | Done: report with charts, history from sign-up, month detail; reconciled against the budget table. |
 | 5. Evals + optimization | Done: 82-case eval set, scorer, model/mode comparison driver, regex fast path + learned merchant cache, fallback model. **The model comparison needs a Groq key** ([eval/README.md](eval/README.md)). |
 | 6. MCP | Done: `/mcp` server on the same tools, personal tokens, tested with the official SDK client ([docs/MCP.md](docs/MCP.md)). |
 | 7. Polish + release | Done: public multi-user app, deploy automation, personal data kept out of the repo. |
+| After launch | Done: own categories and budgets, voice and driving mode, smarter categorizing, quick log, currency, city and time zone. |
 | 8. Car maintenance log | Not started: the plan starts it after launch and a 14-day trial. |
 
 ## Deploy for free (one time, about 15 minutes)
@@ -111,7 +140,7 @@ Other holds what is left each month after spending, invested in an index fund, g
 npm test
 ```
 
-About 225 tests: Cairo dates around midnight in summer and winter time, every tool, budgets and copy-forward, reports and history (including a check that every view agrees), the fast path and merchant cache, the `/chat` loop with a scripted LLM, the fallback model and the shared AI cap, MCP, sign-up, sessions, API tokens and account deletion, **cross-account isolation**, Access JWT verification with a fake issuer, CSRF and rate limits.
+About 270 tests: dates around midnight in summer and winter time, every tool, budgets and copy-forward, reports and history (including a check that every view agrees), the fast path and merchant cache, the `/chat` loop with a scripted LLM, the fallback model and the shared AI cap, MCP, quick log, currencies, per-account time zones, sign-up, sessions, API tokens and account deletion, **cross-account isolation**, Access JWT verification with a fake issuer, CSRF and rate limits.
 
 ```bash
 npm run eval -- --mode fastpath
