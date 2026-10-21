@@ -8,6 +8,7 @@
 - `list_categories` tool for MCP clients.
 - Quick log: one-tap buttons for your 5 most common entries, with your last amount.
 - Pick your currency (30 main ones or any ISO code) in setup, the account menu or Edit categories; budgets and totals use it (migration 0009).
+- City and time zone per account: type your city and pick it (about 7,300 cities); "today", months and history follow it (migration 0010).
 
 ## 0.7.0 (2026-10-20): Open to everyone
 

@@ -132,6 +132,7 @@ Results land in [eval/RESULTS.md](eval/RESULTS.md). The fast-path-only run (no m
 | `LLM_BASE_URL` | vars or `.dev.vars` | derived from the provider |
 | `FAST_PATH` | vars | `on` (`off` sends everything to the model) |
 | `LARGE_AMOUNT_THRESHOLD`, `OLD_DATE_CONFIRM_DAYS` | vars | `5000` (EGP accounts; other currencies use a built-in limit of about 500 USD, D45), `60` days |
+| `TIMEZONE` | vars | `Africa/Cairo`, only a fallback: each account picks its own city (D46) |
 | `SIGNUP_OPEN` | vars | `on` (`off` closes new sign-ups) |
 | `LLM_RATE_PER_DAY` | vars | `800` model messages a day, all accounts together |
 | `CHAT_RATE_PER_MIN`, `CHAT_RATE_PER_DAY`, `API_RATE_PER_MIN` | vars | `20`, `200`, `300` per account (0 disables) |
@@ -145,3 +146,8 @@ Results land in [eval/RESULTS.md](eval/RESULTS.md). The fast-path-only run (no m
 - [docs/MCP.md](docs/MCP.md): connecting MCP clients; direct function calling vs MCP
 - [eval/README.md](eval/README.md): running and extending the evals
 - [CHANGELOG.md](CHANGELOG.md)
+
+## Credits
+
+- City list (`public/data/cities.json`, rebuilt with `npm run build:cities`): [city-timezones](https://github.com/kevinroberts/city-timezones) (MIT), with city data from [simplemaps.com World Cities Basic](https://simplemaps.com/data/world-cities) (CC BY 4.0).
+- Charts: Chart.js (MIT), vendored in `public/vendor/`.

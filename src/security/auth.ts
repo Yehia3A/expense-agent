@@ -21,6 +21,8 @@ export interface Identity {
   userId: string;
   username: string;
   via: "token" | "session" | "local";
+  /** The account's time zone (D46); unset means the app default. */
+  timezone?: string;
   /** Refreshed session cookie to send back (the 30 days slid forward). */
   setCookie?: string;
 }
@@ -46,16 +48,16 @@ export async function identify(req: Request, env: Env, now: number): Promise<Ide
   const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
   if (bearer) {
     const row = await env.DB.prepare(
-      `SELECT t.id, t.last_used_at, u.id AS user_id, u.username
+      `SELECT t.id, t.last_used_at, u.id AS user_id, u.username, u.timezone
        FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.id = ?`,
     )
       .bind(await sha256Hex(bearer))
-      .first<{ id: string; last_used_at: string | null; user_id: string; username: string }>();
+      .first<{ id: string; last_used_at: string | null; user_id: string; username: string; timezone: string }>();
     if (!row) return null; // a wrong token never falls back to anything else
     if (!row.last_used_at || now - Date.parse(row.last_used_at) > 86_400_000) {
       await env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").bind(new Date(now).toISOString(), row.id).run();
     }
-    return { userId: row.user_id, username: row.username, via: "token" };
+    return { userId: row.user_id, username: row.username, via: "token", timezone: row.timezone };
   }
 
   const session = readSessionToken(req);
@@ -66,6 +68,7 @@ export async function identify(req: Request, env: Env, now: number): Promise<Ide
         userId: s.user_id,
         username: s.username,
         via: "session",
+        timezone: s.timezone,
         ...(s.renewed ? { setCookie: sessionCookie(session, url.protocol === "https:") } : {}),
       };
     }

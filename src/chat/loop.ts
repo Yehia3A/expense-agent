@@ -51,6 +51,8 @@ const MUTATING = new Set(["add_expense", "update_expense", "delete_expense", "un
 
 export interface ChatDeps {
   now?: () => Date;
+  /** The account's time zone (D46). */
+  timezone?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -70,7 +72,7 @@ export async function runChat(env: Env, userId: string, req: ChatRequest, deps: 
     .first<{ response: string }>();
   if (prior) return { ...(JSON.parse(prior.response) as ChatResponse), replayed: true };
 
-  const config = appConfig(env);
+  const config = appConfig(env, deps.timezone);
   const ctx: ToolContext = { db: env.DB, userId, now, config, requestId: req.request_id, source: "chat", lineCounter: { next: 0 } };
   const out: ChatResponse = {
     request_id: req.request_id,
@@ -213,7 +215,7 @@ async function runLlm(
   }));
   const currency = await currencyOf(ctx);
   const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, largeAmountFor(currency, ctx.config), currency) },
+    { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, largeAmountFor(currency, ctx.config), currency, ctx.config.tz) },
     ...req.history,
     { role: "user", content: req.message },
   ];

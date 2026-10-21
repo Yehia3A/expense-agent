@@ -1,6 +1,7 @@
 // Category editor (D41): pick suggestions or write your own names, up to the
 // limit, each with a monthly budget; "Other" is always there. Used by the
 // first-time setup screen and by "Edit categories" on the Budget card.
+import { cityPicker } from "./city.js";
 import { currencyPicker } from "./currency.js";
 import { api, el, fmt } from "./lib.js";
 
@@ -16,6 +17,9 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
   let otherBudget = other?.budget ?? null;
   const savedCurrency = payload.currency ?? "EGP";
   let currency = payload.initialCurrency ?? savedCurrency;
+  // Setup only: where you live, for the time zone (D46).
+  let location = payload.location ?? null;
+  const cityBox = location ? cityPicker(location, (l) => (location = l)) : null;
   const curNote = el("p", { class: "muted small cur-note", hidden: true }, "Amounts aren't converted: what you recorded so far will show in the new currency.");
   const picker = currencyPicker(currency, (c) => {
     currency = c;
@@ -134,11 +138,12 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
   save.addEventListener("click", async () => {
     const clean = items.map((i) => ({ ...i, name: i.name.trim() })).filter((i) => i.name);
     if (!currency) return showError("Pick a currency, or type a valid 3-letter code like USD.");
+    if (location && !location.timezone) return showError("Pick your city from the list.");
     save.disabled = true;
     save.classList.add("loading");
     showError("");
     try {
-      const saved = await api("/api/categories", { method: "PUT", body: { categories: clean, other_budget: otherBudget, currency } });
+      const saved = await api("/api/categories", { method: "PUT", body: { categories: clean, other_budget: otherBudget, currency, ...(location ? { timezone: location.timezone, city: location.city ?? undefined } : {}) } });
       onSaved?.(saved);
     } catch (err) {
       showError(err.message);
@@ -158,6 +163,7 @@ export function renderCategoryEditor(root, payload, { submitLabel = "Save", onSa
     : save;
 
   root.replaceChildren(
+    ...(cityBox ? [cityBox] : []),
     picker,
     curNote,
     el("h3", { class: "cat-h" }, "Suggestions"),

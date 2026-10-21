@@ -36,9 +36,10 @@ export interface AppConfig {
   oldDateConfirmDays: number;
 }
 
-export function appConfig(env: Env): AppConfig {
+/** `tz` is the account's own time zone (D46); TIMEZONE is only the fallback. */
+export function appConfig(env: Env, tz?: string | null): AppConfig {
   return {
-    tz: env.TIMEZONE || "Africa/Cairo",
+    tz: tz || env.TIMEZONE || "Africa/Cairo",
     largeAmountThreshold: num(env.LARGE_AMOUNT_THRESHOLD, 5000),
     oldDateConfirmDays: num(env.OLD_DATE_CONFIRM_DAYS, 60),
   };

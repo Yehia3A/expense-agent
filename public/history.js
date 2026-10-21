@@ -1,6 +1,6 @@
 // History view (plan 10.2): trailing 12-month table, then one month's
 // remaining-by-category (its own budgets) and its transactions.
-import { $, api, cairoToday, el, expenseRow, fillMonthSelect, fmt, lastDayOf, monthLabel, state } from "./lib.js";
+import { $, api, localToday, el, expenseRow, fillMonthSelect, fmt, lastDayOf, monthLabel, state } from "./lib.js";
 import { renderBudgetTable } from "./track.js";
 
 const select = $("#hist-month");
@@ -67,7 +67,7 @@ async function loadMonth() {
 
 export async function loadHistory() {
   const h = await api("/api/history?months=12");
-  fillMonthSelect(select, h.months_with_data, select.value || cairoToday().slice(0, 7));
+  fillMonthSelect(select, h.months_with_data, select.value || localToday().slice(0, 7));
   renderTable(h);
   await loadMonth();
 }

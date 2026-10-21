@@ -22,8 +22,14 @@ export const money = (n, currency) => `${fmt(n)}${currency && currency !== state
 export const newId = () =>
   (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
 
-export function cairoToday() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+/** Today as YYYY-MM-DD in the account's time zone (D46). */
+export function localToday() {
+  const opts = { year: "numeric", month: "2-digit", day: "2-digit" };
+  try {
+    return new Intl.DateTimeFormat("en-CA", { ...opts, timeZone: state.timezone }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { ...opts, timeZone: "Africa/Cairo" }).format(new Date());
+  }
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -38,7 +44,7 @@ export const lastDayOf = (m) => {
 };
 
 // ---------- shared state ----------
-export const state = { categories: [], currency: "EGP" };
+export const state = { categories: [], currency: "EGP", timezone: "Africa/Cairo" };
 export const catName = (key) => state.categories.find((c) => c.key === key)?.display_name ?? key;
 
 const listeners = new Set();
@@ -137,7 +143,7 @@ export function expenseRow(r) {
 function startEdit(tr, r) {
   const row = $("#tpl-edit").content.firstElementChild.cloneNode(true);
   row.querySelector("[name=date]").value = r.expense_date;
-  row.querySelector("[name=date]").max = cairoToday();
+  row.querySelector("[name=date]").max = localToday();
   row.querySelector("[name=note]").value = r.note;
   row.querySelector("[name=amount]").value = r.amount;
   const sel = row.querySelector("[name=category]");
@@ -164,7 +170,7 @@ function startEdit(tr, r) {
 
 /** <option>s for a month <select>: every month with data plus the current month, newest first. */
 export function fillMonthSelect(select, months, selected) {
-  const current = cairoToday().slice(0, 7);
+  const current = localToday().slice(0, 7);
   const all = [...new Set([current, ...months])].filter((m) => m <= current).sort().reverse();
   select.replaceChildren(...all.map((m) => el("option", { value: m, selected: m === selected }, monthLabel(m, true))));
   if (!all.includes(selected)) select.value = all[0];

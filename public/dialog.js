@@ -1,6 +1,7 @@
 // In-page dialogs that replace the browser's confirm()/prompt() boxes:
 // centered card, dimmed backdrop, Esc or a click outside cancels, focus stays inside.
 import { renderCategoryEditor } from "./categories.js";
+import { cityPicker } from "./city.js";
 import { currencyName, currencyPicker } from "./currency.js";
 import { api, el, toast } from "./lib.js";
 
@@ -288,4 +289,48 @@ export function currencyDialog(current, onSaved) {
   });
   open(form);
   form.querySelector("select").focus();
+}
+
+/** City and time zone (D46): "today" and months follow it. */
+export function cityDialog(current, onSaved) {
+  let picked = current;
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const save = el("button", { type: "submit" }, "Save");
+  const cancel = el("button", { type: "button", class: "ghost" }, "Cancel");
+  const form = el(
+    "form",
+    { class: "dialog-card", novalidate: true },
+    icon("info"),
+    el("h2", { class: "dialog-title" }, "City & time zone"),
+    el("p", { class: "dialog-text" }, "Your city sets when your day and month start, so late-night spending lands on the right date. Past expenses keep their dates."),
+    cityPicker(current, (l) => {
+      picked = l;
+      error.hidden = true;
+    }),
+    error,
+    el("div", { class: "dialog-actions" }, cancel, save),
+  );
+  cancel.addEventListener("click", () => dlg.close("cancel"));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!picked?.timezone) {
+      error.textContent = "Pick your city from the list.";
+      error.hidden = false;
+      return;
+    }
+    if (picked.timezone === current.timezone && picked.city === current.city) return dlg.close("cancel");
+    save.disabled = true;
+    try {
+      const r = await api("/api/settings", { method: "PUT", body: { timezone: picked.timezone, city: picked.city } });
+      dlg.close("ok");
+      onSaved({ timezone: r.timezone, city: r.city });
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      save.disabled = false;
+    }
+  });
+  open(form);
+  form.querySelector(".city-input").focus();
 }

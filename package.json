@@ -20,7 +20,8 @@
     "claim:local": "node scripts/claim.mjs --local",
     "claim:remote": "node scripts/claim.mjs --remote",
     "reset-password:local": "node scripts/reset-password.mjs --local",
-    "reset-password:remote": "node scripts/reset-password.mjs --remote"
+    "reset-password:remote": "node scripts/reset-password.mjs --remote",
+    "build:cities": "node scripts/build-cities.mjs"
   },
   "dependencies": {
     "zod": "4.6.7"
@@ -32,6 +33,7 @@
     "@vitest/runner": "4.1.11",
     "@vitest/snapshot": "4.1.11",
     "chart.js": "4.5.1",
+    "city-timezones": "1.3.4",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
     "wrangler": "4.151.2"

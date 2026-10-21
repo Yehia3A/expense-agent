@@ -89,6 +89,7 @@ export interface McpDeps {
   now?: () => Date;
   /** The account the caller's personal API token (or session) belongs to. */
   userId: string;
+  timezone?: string;
 }
 
 export async function handleMcp(req: Request, env: Env, deps: McpDeps): Promise<Response> {
@@ -122,7 +123,7 @@ export async function handleMcp(req: Request, env: Env, deps: McpDeps): Promise<
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions:
-          "Personal expense tracker (amounts in the account currency unless a currency is given; Africa/Cairo dates). Record spending with add_expense, never invent amounts, " +
+          "Personal expense tracker (amounts in the account currency unless a currency is given; dates in the account's time zone). Record spending with add_expense, never invent amounts, " +
           "and answer spending questions with the read-only tools, quoting their numbers exactly.",
       });
     }
@@ -145,7 +146,7 @@ async function callMcpTool(env: Env, id: JsonRpcId, params: Record<string, unkno
     db: env.DB,
     userId: deps.userId,
     now: deps.now ?? (() => new Date()),
-    config: appConfig(env),
+    config: appConfig(env, deps.timezone),
     requestId: ulid(),
     source: "mcp",
     lineCounter: { next: 0 },

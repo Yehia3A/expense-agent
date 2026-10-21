@@ -350,3 +350,15 @@ body.driving { overflow: hidden; }
 .cur-other { flex: 0 0 120px; padding: 10px 12px; border-radius: 10px; font-size: 15px; text-transform: uppercase; }
 .cur-hint:empty { display: none; }
 .cur-note { margin: 0; text-align: left; }
+
+/* ---------- city picker (D46) ---------- */
+.city-picker { display: grid; gap: 6px; text-align: left; }
+.city-input { width: 100%; padding: 10px 12px; border-radius: 10px; font-size: 15px; }
+.city-list { list-style: none; margin: 0; padding: 4px; max-height: 264px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.city-opt { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.city-opt[aria-selected="true"], .city-opt:hover { background: var(--input-bg); }
+.city-name { display: grid; min-width: 0; font-weight: 600; }
+.city-place { font-weight: 400; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.city-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.city-status { margin: 0; }
+.city-status:empty { display: none; }

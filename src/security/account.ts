@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { accountCurrency } from "../tools/currency";
+import { accountLocation } from "../tools/location";
 import type { Env } from "../env";
 import { ulid } from "../lib/ulid";
 import { DUMMY_HASH, hashPassword, verifyPassword } from "./passwords";
@@ -85,8 +86,9 @@ export async function handleAuth(req: Request, env: Env, url: URL, now: number):
         .first<{ created_at: string; last_used_at: string | null }>();
       const setup = !(await env.DB.prepare("SELECT 1 FROM user_categories WHERE user_id = ? LIMIT 1").bind(s.user_id).first());
       const currency = await accountCurrency(env.DB, s.user_id);
+      const { timezone, city } = await accountLocation(env.DB, s.user_id);
       return json(
-        { authenticated: true, username: s.username, api_token: t ?? null, needs_setup: setup, currency },
+        { authenticated: true, username: s.username, api_token: t ?? null, needs_setup: setup, currency, timezone, city },
         200,
         s.renewed ? { "set-cookie": sessionCookie(token!, secure) } : {},
       );

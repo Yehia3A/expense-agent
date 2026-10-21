@@ -10,6 +10,7 @@ const DAY_MS = 86_400_000;
 export interface SessionUser {
   user_id: string;
   username: string;
+  timezone: string;
 }
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -49,11 +50,11 @@ export async function getSession(db: D1Database, token: string, now: number): Pr
   const id = await sha256Hex(token);
   const row = await db
     .prepare(
-      `SELECT s.user_id, s.renewed_at, s.expires_at, u.username
+      `SELECT s.user_id, s.renewed_at, s.expires_at, u.username, u.timezone
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
     )
     .bind(id)
-    .first<{ user_id: string; renewed_at: string; expires_at: string; username: string }>();
+    .first<{ user_id: string; renewed_at: string; expires_at: string; username: string; timezone: string }>();
   if (!row) return null;
   if (Date.parse(row.expires_at) <= now) {
     await db.prepare("DELETE FROM sessions WHERE id = ?").bind(id).run();
@@ -67,7 +68,7 @@ export async function getSession(db: D1Database, token: string, now: number): Pr
       .run();
     renewed = true;
   }
-  return { user_id: row.user_id, username: row.username, renewed };
+  return { user_id: row.user_id, username: row.username, timezone: row.timezone, renewed };
 }
 
 export async function deleteSession(db: D1Database, token: string) {

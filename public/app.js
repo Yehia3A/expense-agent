@@ -3,10 +3,11 @@
 // History views (#track, #report, #history).
 import { getMe, showWelcome, signOut } from "./auth.js";
 import { renderCategoryEditor } from "./categories.js";
+import { guessLocation } from "./city.js";
 import { guessCurrency } from "./currency.js";
-import { apiTokenDialog, categoriesDialog, changePasswordDialog, currencyDialog, deleteAccountDialog } from "./dialog.js";
+import { apiTokenDialog, categoriesDialog, changePasswordDialog, cityDialog, currencyDialog, deleteAccountDialog } from "./dialog.js";
 import { initHistory, loadHistory } from "./history.js";
-import { $, api, cairoToday, dataChanged, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
+import { $, api, localToday, dataChanged, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
 import { initReport, loadReport, refreshReportMonths } from "./report.js";
 import { focusChat, initTrack, loadTrack } from "./track.js";
 import { initVoice } from "./drive.js";
@@ -79,6 +80,16 @@ function wireUserMenu(username) {
     const me = await getMe().catch(() => null);
     apiTokenDialog(me?.api_token ?? null);
   });
+  $("#menu-city").addEventListener("click", async () => {
+    close();
+    const s = await api("/api/settings").catch(() => ({ timezone: state.timezone, city: null }));
+    cityDialog({ timezone: s.timezone, city: s.city }, (l) => {
+      state.timezone = l.timezone;
+      $("#today").textContent = localToday();
+      toast(`Time zone set to ${l.city ?? l.timezone}.`, "ok");
+      dataChanged();
+    });
+  });
   $("#menu-currency").addEventListener("click", () => {
     close();
     currencyDialog(state.currency, (c) => {
@@ -104,18 +115,20 @@ function useCategories(payload) {
 }
 
 /** First time only: pick categories and budgets before the app opens (D41). */
-function runSetup(payload) {
-  return new Promise((resolve) => {
+function runSetup(payload, me) {
+  return new Promise(async (resolve) => {
     $("#boot").hidden = true;
     $("#welcome").hidden = true;
     $("#app").hidden = true;
     $("#setup").hidden = false;
     // First pick for the currency comes from the device's time zone (D45).
-    renderCategoryEditor($("#setup-editor"), { ...payload, initialCurrency: guessCurrency(payload.currency) }, {
+    // City and time zone: what the account has, or a guess from the device (D46).
+    const location = me.city ? { timezone: me.timezone, city: me.city } : await guessLocation();
+    renderCategoryEditor($("#setup-editor"), { ...payload, initialCurrency: guessCurrency(payload.currency), location }, {
       submitLabel: "Start tracking",
       onSaved: (saved) => {
         $("#setup").hidden = true;
-        resolve(saved);
+        resolve({ ...saved, timezone: location.timezone });
       },
     });
   });
@@ -129,13 +142,17 @@ async function startApp(me) {
     $("#boot-text").textContent = err.message;
     return;
   }
-  if (payload.needs_setup) payload = await runSetup(payload);
+  if (me.timezone) state.timezone = me.timezone;
+  if (payload.needs_setup) {
+    payload = await runSetup(payload, me);
+    state.timezone = payload.timezone ?? state.timezone;
+  }
   useCategories(payload);
 
   $("#boot").hidden = true;
   $("#welcome").hidden = true;
   $("#app").hidden = false;
-  $("#today").textContent = cairoToday();
+  $("#today").textContent = localToday();
   wireUserMenu(me.username ?? "you");
   initTrack();
   initReport();

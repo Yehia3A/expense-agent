@@ -1,7 +1,7 @@
 // Report view (plan 10.3): totals vs last month, category breakdown, daily
 // trend, top expenses and items, projection, needs-review list.
 import { barChart } from "./charts.js";
-import { $, api, cairoToday, catName, el, expenseRow, fillMonthSelect, fmt, money, monthLabel } from "./lib.js";
+import { $, api, localToday, catName, el, expenseRow, fillMonthSelect, fmt, money, monthLabel } from "./lib.js";
 
 const select = $("#report-month");
 let last = null; // last report, for re-drawing charts on theme change
@@ -101,7 +101,7 @@ function render(r) {
 }
 
 export async function loadReport() {
-  const month = select.value || cairoToday().slice(0, 7);
+  const month = select.value || localToday().slice(0, 7);
   render(await api(`/api/report?month=${encodeURIComponent(month)}`));
 }
 
@@ -112,5 +112,5 @@ export async function initReport() {
 
 export async function refreshReportMonths() {
   const h = await api("/api/history?months=1");
-  fillMonthSelect(select, h.months_with_data, select.value || cairoToday().slice(0, 7));
+  fillMonthSelect(select, h.months_with_data, select.value || localToday().slice(0, 7));
 }

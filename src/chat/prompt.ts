@@ -20,13 +20,13 @@ function describe(c: CategoryInfo): string {
  * System prompt. Every date in it is computed by code (plan F2); the model
  * only copies these values into tool arguments.
  */
-export function systemPrompt(today: string, categories: CategoryInfo[], largeAmountThreshold: number | null, currency = "EGP"): string {
+export function systemPrompt(today: string, categories: CategoryInfo[], largeAmountThreshold: number | null, currency = "EGP", tz = "Africa/Cairo"): string {
   const month = today.slice(0, 7);
   const cur = monthRange(month);
   const prev = monthRange(addMonths(month, -1));
   return `You are ExpenseAgent, a personal expense tracker. The user types what they spent; you record it with tools and answer questions about their spending. Amounts are in ${currency} unless they name another currency; then pass its ISO code in "currency".
 
-Today is ${WEEKDAY_NAMES[weekday(today)]} ${today} (Africa/Cairo).
+Today is ${WEEKDAY_NAMES[weekday(today)]} ${today} (${tz}).
 This month: ${cur.start} to ${addDays(cur.end, -1)}. Last month: ${prev.start} to ${addDays(prev.end, -1)}.
 
 This user's own categories (use the key only; they chose these names themselves), with what they actually filed in each recently:

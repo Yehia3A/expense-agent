@@ -12,6 +12,7 @@ import { callTool, type ToolOutcome } from "./tools/registry";
 import { budgetStatus } from "./tools/budgets";
 import { MAX_CATEGORIES, needsSetup, OTHER_KEY, PRESETS, saveCategories, userCategories } from "./tools/categories";
 import { accountCurrency, currencyOf, setAccountCurrency } from "./tools/currency";
+import { accountLocation, setAccountLocation } from "./tools/location";
 import type { ToolContext } from "./tools/types";
 import { isValidMonth, localDate, monthOf } from "./lib/dates";
 
@@ -34,12 +35,12 @@ const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =
 const fail = (status: number, error: string, details?: unknown, extra?: Record<string, string>) =>
   json({ error, details }, status, extra);
 
-function apiCtx(env: Env, userId: string, requestId: string = ulid()): ToolContext {
+function apiCtx(env: Env, me: Pick<Identity, "userId" | "timezone">, requestId: string = ulid()): ToolContext {
   return {
     db: env.DB,
-    userId,
+    userId: me.userId,
     now: () => new Date(),
-    config: appConfig(env),
+    config: appConfig(env, me.timezone),
     requestId,
     source: "api",
     lineCounter: { next: 0 },
@@ -86,11 +87,11 @@ async function logApi(env: Env, userId: string, requestId: string, what: string,
     .run();
 }
 
-async function mutate(env: Env, userId: string, name: string, args: unknown, requestId?: string): Promise<Response> {
+async function mutate(env: Env, me: Identity, name: string, args: unknown, requestId?: string): Promise<Response> {
   const started = Date.now();
-  const ctx = apiCtx(env, userId, requestId);
+  const ctx = apiCtx(env, me, requestId);
   const outcome = await callTool(ctx, name, args);
-  await logApi(env, userId, ctx.requestId, name, args, outcome, started, outcome.ok ? undefined : outcome.error);
+  await logApi(env, me.userId, ctx.requestId, name, args, outcome, started, outcome.ok ? undefined : outcome.error);
   return fromOutcome(outcome);
 }
 
@@ -100,6 +101,8 @@ const CategoriesRequest = z.object({
     .max(20),
   other_budget: z.number().min(0).max(100_000_000).nullable().optional(),
   currency: z.string().optional(),
+  timezone: z.string().max(64).optional(),
+  city: z.string().max(200).optional(),
   month: z.string().refine(isValidMonth, "month must be YYYY-MM").optional(),
 });
 
@@ -131,16 +134,21 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
   const uid = me.userId;
 
   // The account's own categories (D41) with this month's budgets, plus the suggestions for the editor.
-  if (path === "/api/categories" && method === "GET") return json(await categoriesPayload(apiCtx(env, uid)));
+  if (path === "/api/categories" && method === "GET") return json(await categoriesPayload(apiCtx(env, me)));
 
   if (path === "/api/categories" && method === "PUT") {
     const started = Date.now();
     const parsed = CategoriesRequest.safeParse(await body(req));
     if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
-    const ctx = apiCtx(env, uid);
+    const ctx = apiCtx(env, me);
     if (parsed.data.currency !== undefined) {
       const c = await setAccountCurrency(env.DB, uid, parsed.data.currency);
       if (!c.ok) return fail(400, c.error);
+    }
+    if (parsed.data.timezone !== undefined) {
+      const l = await setAccountLocation(env.DB, uid, parsed.data.timezone, parsed.data.city);
+      if (!l.ok) return fail(400, l.error);
+      ctx.config.tz = l.timezone;
     }
     const r = await saveCategories(ctx, parsed.data.categories, parsed.data.other_budget, parsed.data.month);
     await logApi(env, uid, ctx.requestId, "save_categories", parsed.data, r, started, r.ok ? undefined : r.error);
@@ -148,25 +156,37 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
     return json(await categoriesPayload(ctx));
   }
 
-  // The account currency (D45). Changing it relabels, never converts.
-  if (path === "/api/settings" && method === "GET") return json({ currency: await accountCurrency(env.DB, uid) });
+  // The account currency (D45; changing it relabels, never converts) and city / time zone (D46).
+  if (path === "/api/settings" && method === "GET") {
+    return json({ currency: await accountCurrency(env.DB, uid), ...(await accountLocation(env.DB, uid)) });
+  }
   if (path === "/api/settings" && method === "PUT") {
-    const b = (await body(req)) as { currency?: unknown } | undefined;
-    const r = await setAccountCurrency(env.DB, uid, b?.currency);
-    if (!r.ok) return fail(400, r.error);
-    return json(r);
+    const b = (await body(req)) as { currency?: unknown; timezone?: unknown; city?: unknown } | undefined;
+    if (b?.currency === undefined && b?.timezone === undefined) return fail(400, "nothing to change");
+    const out: Record<string, unknown> = {};
+    if (b?.timezone !== undefined) {
+      const l = await setAccountLocation(env.DB, uid, b.timezone, b.city);
+      if (!l.ok) return fail(400, l.error);
+      Object.assign(out, l);
+    }
+    if (b?.currency !== undefined) {
+      const r = await setAccountCurrency(env.DB, uid, b.currency);
+      if (!r.ok) return fail(400, r.error);
+      Object.assign(out, r);
+    }
+    return json({ ok: true, ...out });
   }
 
-  if (path === "/api/quick" && method === "GET") return json(await quickItems(apiCtx(env, uid)));
+  if (path === "/api/quick" && method === "GET") return json(await quickItems(apiCtx(env, me)));
 
   if (path === "/api/expenses/recent" && method === "GET") {
     const limit = Math.min(Math.max(Number(q.limit) || 20, 1), 200);
-    return json(await recentExpenses(apiCtx(env, uid), limit));
+    return json(await recentExpenses(apiCtx(env, me), limit));
   }
 
   if (path === "/api/expenses" && method === "GET") {
     return fromOutcome(
-      await callTool(apiCtx(env, uid), "list_expenses", {
+      await callTool(apiCtx(env, me), "list_expenses", {
         start_date: q.start_date,
         end_date: q.end_date,
         category: q.category,
@@ -180,7 +200,7 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
     const started = Date.now();
     const parsed = AddRequest.safeParse(await body(req));
     if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
-    const ctx = apiCtx(env, uid, parsed.data.request_id);
+    const ctx = apiCtx(env, me, parsed.data.request_id);
     const result = await addExpenses(ctx, parsed.data.items, parsed.data.confirmed);
     await logApi(env, uid, ctx.requestId, "add_expense", parsed.data, result, started, result.status === "error" ? result.errors.join("; ") : undefined);
     return json(result, result.status === "error" ? 400 : 200);
@@ -189,28 +209,28 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
   const idMatch = /^\/api\/expenses\/([A-Za-z0-9]+)$/.exec(path);
   if (idMatch && method === "PATCH") {
     const b = (await body(req)) as { fields?: unknown } | undefined;
-    return mutate(env, uid, "update_expense", { id: idMatch[1], fields: b?.fields ?? b });
+    return mutate(env, me, "update_expense", { id: idMatch[1], fields: b?.fields ?? b });
   }
-  if (idMatch && method === "DELETE") return mutate(env, uid, "delete_expense", { id: idMatch[1] });
+  if (idMatch && method === "DELETE") return mutate(env, me, "delete_expense", { id: idMatch[1] });
 
   if (path === "/api/undo" && method === "POST") {
     const b = (await body(req)) as { request_id?: string } | undefined;
-    return mutate(env, uid, "undo_request", { request_id: b?.request_id });
+    return mutate(env, me, "undo_request", { request_id: b?.request_id });
   }
 
   if (path === "/api/budget-status" && method === "GET") {
-    return fromOutcome(await callTool(apiCtx(env, uid), "budget_status", { month: q.month || undefined }));
+    return fromOutcome(await callTool(apiCtx(env, me), "budget_status", { month: q.month || undefined }));
   }
 
-  if (path === "/api/budgets" && method === "PUT") return mutate(env, uid, "set_budget", await body(req));
+  if (path === "/api/budgets" && method === "PUT") return mutate(env, me, "set_budget", await body(req));
 
   if (path === "/api/report" && method === "GET") {
-    return fromOutcome(await callTool(apiCtx(env, uid), "monthly_report", { month: q.month || undefined }));
+    return fromOutcome(await callTool(apiCtx(env, me), "monthly_report", { month: q.month || undefined }));
   }
 
   if (path === "/api/history" && method === "GET") {
     return fromOutcome(
-      await callTool(apiCtx(env, uid), "monthly_history", {
+      await callTool(apiCtx(env, me), "monthly_history", {
         end_month: q.end_month || undefined,
         ...(q.months ? { months: Number(q.months) } : {}),
       }),
@@ -219,7 +239,7 @@ async function handleApi(req: Request, env: Env, url: URL, me: Identity): Promis
 
   if (path === "/api/top" && method === "GET") {
     return fromOutcome(
-      await callTool(apiCtx(env, uid), "top_spending", {
+      await callTool(apiCtx(env, me), "top_spending", {
         start_date: q.start_date,
         end_date: q.end_date,
         by: q.by || undefined,
@@ -280,7 +300,7 @@ export async function handle(req: Request, env: Env, deps: HandlerDeps = {}): Pr
 }
 
 async function route(req: Request, env: Env, url: URL, me: Identity, isChat: boolean, isMcp: boolean, deps: HandlerDeps): Promise<Response> {
-  if (isMcp) return handleMcp(req, env, { now: deps.now, userId: me.userId });
+  if (isMcp) return handleMcp(req, env, { now: deps.now, userId: me.userId, timezone: me.timezone });
   if (url.pathname === "/api/transcribe") {
     return handleTranscribe(req, env, { userId: me.userId, now: deps.now?.().getTime() ?? Date.now(), fetchImpl: deps.fetchImpl });
   }
@@ -288,7 +308,7 @@ async function route(req: Request, env: Env, url: URL, me: Identity, isChat: boo
     if (req.method !== "POST") return fail(405, "method not allowed");
     const parsed = ChatRequest.safeParse(await body(req));
     if (!parsed.success) return fail(400, "invalid request", z.treeifyError(parsed.error));
-    return json(await runChat(env, me.userId, parsed.data, { fetchImpl: deps.fetchImpl, now: deps.now }));
+    return json(await runChat(env, me.userId, parsed.data, { fetchImpl: deps.fetchImpl, now: deps.now, timezone: me.timezone }));
   }
   return handleApi(req, env, url, me);
 }

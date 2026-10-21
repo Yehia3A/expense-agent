@@ -4,3 +4,6 @@
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=()
+
+/data/*
+  Cache-Control: public, max-age=86400

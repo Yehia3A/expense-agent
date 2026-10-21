@@ -1,5 +1,5 @@
 // Track view: chat, budget table for one month, recent expenses.
-import { $, api, cairoToday, catName, dataChanged, el, expenseRow, fmt, newId, toast } from "./lib.js";
+import { $, api, localToday, catName, dataChanged, el, expenseRow, fmt, newId, toast } from "./lib.js";
 
 const logEl = $("#log");
 const form = $("#chat-form");
@@ -246,7 +246,7 @@ async function loadRecent() {
 }
 
 export function initTrack() {
-  const month = cairoToday().slice(0, 7);
+  const month = localToday().slice(0, 7);
   monthInput.value = month;
   monthInput.max = month;
   monthInput.addEventListener("change", () => loadBudget().catch((err) => toast(err.message)));
