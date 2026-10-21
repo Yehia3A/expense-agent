@@ -5,6 +5,8 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
 export interface CategoryInfo {
   key: string;
   display_name: string;
+  /** Examples of what belongs there (suggested categories have them). */
+  hint?: string;
 }
 
 /**
@@ -20,10 +22,10 @@ export function systemPrompt(today: string, categories: CategoryInfo[], largeAmo
 Today is ${WEEKDAY_NAMES[weekday(today)]} ${today} (Africa/Cairo).
 This month: ${cur.start} to ${addDays(cur.end, -1)}. Last month: ${prev.start} to ${addDays(prev.end, -1)}.
 
-Categories (use the key only):
-${categories.map((c) => `- ${c.key}: ${c.display_name}`).join("\n")}
+This user's own categories (use the key only; they chose these names themselves):
+${categories.map((c) => `- ${c.key}: ${c.display_name}${c.hint ? ` (e.g. ${c.hint})` : ""}`).join("\n")}
 
-Category hints: coffee, restaurants, takeaway, delivery, snacks -> food_dining. Vegetables ("vegs"), fruit, supermarket, meat, bread -> groceries. Uber, Careem, taxi, metro, fuel/benzine, parking, tolls -> transport_fuel. Electricity, water, gas, internet, phone credit -> bills_utilities. Cinema, Netflix, games, outings -> entertainment. Clothes, shoes, electronics, gifts for yourself -> shopping. Squash, gym, padel, sports gear, coaching -> sports. Investments and savings (Thndr index fund, gold, bitcoin or crypto on Binance) -> other; that is what other is for. For anything else use other only when nothing fits.
+Pick the category whose name fits the item best, the way this user would file it (e.g. "vegs" belongs in a groceries-like category, "uber" in a transport-like one, Thndr/gold/bitcoin in an investments or savings one). Use other only when nothing fits.
 
 Rules:
 1. Recording spending: call add_expense ONCE with every item from the message in "items". Keep each note short, in the user's words ("coffee", "vegs").

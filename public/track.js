@@ -20,16 +20,15 @@ function addBubble(cls, text) {
 }
 
 // ---------- chat ----------
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const message = input.value.trim();
-  if (!message) return;
-  input.value = "";
+/**
+ * Send one message through /chat and show it in the log. Returns the reply,
+ * or throws. Used by the message box and by driving mode.
+ */
+export async function sendChat(message) {
   $(".hint")?.remove();
   addBubble("user", message);
   const typing = addBubble("bot typing", "…");
   sendBtn.disabled = true;
-
   const request_id = newId();
   try {
     const res = await api("/chat", { method: "POST", body: { message, request_id, history: history.slice(-10) } });
@@ -37,13 +36,27 @@ form.addEventListener("submit", async (e) => {
     renderReply(res);
     history.push({ role: "user", content: message }, { role: "assistant", content: res.reply });
     if (res.changed) dataChanged();
+    return res;
   } catch (err) {
     typing.remove();
     addBubble("bot error", err.message);
+    throw err;
   } finally {
     sendBtn.disabled = false;
-    input.focus();
   }
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = "";
+  try {
+    await sendChat(message);
+  } catch {
+    /* already shown in the log */
+  }
+  input.focus();
 });
 
 function renderReply(res) {

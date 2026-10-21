@@ -14,13 +14,20 @@ export interface Env {
   // Cloudflare Access (Phase 3). Both must be set to enable JWT checks.
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
-  // Rate limits (Phase 3). 0 disables a limit.
+  // Rate limits, per account unless noted. 0 disables a limit.
   CHAT_RATE_PER_MIN?: string;
   CHAT_RATE_PER_DAY?: string;
+  /** Messages per day, across all accounts, that may go to the LLM (the shared free quota). */
+  LLM_RATE_PER_DAY?: string;
+  /** "off" closes sign-ups for new accounts. */
+  SIGNUP_OPEN?: string;
+  /** Voice input (D40): Whisper model, optional other OpenAI-compatible endpoint, daily clips for all accounts. */
+  STT_MODEL?: string;
+  STT_BASE_URL?: string;
+  VOICE_RATE_PER_DAY?: string;
   API_RATE_PER_MIN?: string;
   // Secrets
   LLM_API_KEY?: string;
-  APP_TOKEN?: string;
 }
 
 export interface AppConfig {
@@ -40,8 +47,9 @@ export function appConfig(env: Env): AppConfig {
 export function rateLimits(env: Env) {
   return {
     chatPerMin: num(env.CHAT_RATE_PER_MIN, 20),
-    chatPerDay: num(env.CHAT_RATE_PER_DAY, 500),
+    chatPerDay: num(env.CHAT_RATE_PER_DAY, 200),
     apiPerMin: num(env.API_RATE_PER_MIN, 300),
+    llmPerDay: num(env.LLM_RATE_PER_DAY, 800),
   };
 }
 

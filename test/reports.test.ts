@@ -7,13 +7,13 @@ import { budgetStatus } from "../src/tools/budgets";
 import { addExpenses, deleteExpense } from "../src/tools/expenses";
 import { monthlyHistory, monthlyReport } from "../src/tools/history";
 import { callTool } from "../src/tools/registry";
-import { makeCtx, resetDb } from "./helpers";
+import { makeCtx, resetDb, TEST_USER } from "./helpers";
 
 // Clock: Monday 2026-10-19 in Cairo. October also carries the Excel legacy
 // totals (transport 600 + entertainment 1,200 = 1,800).
 beforeEach(async () => {
   await resetDb();
-  await importLegacy(env.DB, legacyData as LegacyData);
+  await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
   const add = (items: Parameters<typeof addExpenses>[1]) => addExpenses(makeCtx(), items, true);
   await add([
     { amount: 200, category: "food_dining", note: "coffee", date_token: "date:2026-10-19" },
@@ -88,7 +88,7 @@ describe("monthly_report (plan 10.3)", () => {
   });
 
   it("legacy-only months report totals without transactions", async () => {
-    await importLegacy(env.DB, { months: { "2026-07": { other: 500 } }, expected_totals: {} });
+    await importLegacy(env.DB, TEST_USER, { months: { "2026-07": { other: 500 } }, expected_totals: {} });
     const r = await monthlyReport(makeCtx(), "2026-07");
     expect(r).toMatchObject({ has_data: true, has_transactions: false, total: 500, legacy_total: 500, top_expenses: [] });
   });
@@ -99,16 +99,32 @@ describe("monthly_report (plan 10.3)", () => {
 });
 
 describe("monthly_history (plan 10.2)", () => {
-  it("trailing 12 months ending this month, newest first", async () => {
-    const h = await monthlyHistory(makeCtx(), "2026-10", 12);
-    expect(h.rows.map((r) => r.month)).toEqual([
-      "2026-10", "2026-09", "2026-08", "2026-07", "2026-06", "2026-05",
-      "2026-04", "2026-03", "2026-02", "2026-01", "2025-12", "2025-11",
-    ]);
+  it("starts with the account: the sign-up month and the one before, newest first (D42)", async () => {
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('local', 'localuser', 'x', '2026-10-05T09:00:00Z', '2026-10-05T09:00:00Z')").run();
+    const h = await monthlyHistory(makeCtx(), "2026-10");
+    expect(h.joined_month).toBe("2026-10");
+    expect(h.rows.map((r) => r.month)).toEqual(["2026-10", "2026-09"]);
+  });
+
+  it("an older account shows every month since it joined, never earlier empty ones", async () => {
+    await env.DB.prepare("DELETE FROM expenses").run();
+    await env.DB.prepare("DELETE FROM legacy_monthly_totals").run();
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('local', 'localuser', 'x', '2026-07-10T09:00:00Z', '2026-07-10T09:00:00Z')").run();
+    const h = await monthlyHistory(makeCtx(), "2026-10");
+    expect(h.rows.map((r) => r.month)).toEqual(["2026-10", "2026-09", "2026-08", "2026-07", "2026-06"]);
+  });
+
+  it("reaches further back only for months that have records", async () => {
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('local', 'localuser', 'x', '2026-10-05T09:00:00Z', '2026-10-05T09:00:00Z')").run();
+    await importLegacy(env.DB, TEST_USER, { months: { "2026-06": { other: 500 } }, expected_totals: {} });
+    const h = await monthlyHistory(makeCtx(), "2026-10");
+    expect(h.rows.map((r) => r.month)).toEqual(["2026-10", "2026-09", "2026-08", "2026-07", "2026-06"]);
+    expect(h.rows.at(-1)).toMatchObject({ month: "2026-06", total: 500, has_legacy: true });
   });
 
   it("'-' (null) for months without records, real zeros for tracked months", async () => {
-    const h = await monthlyHistory(makeCtx(), "2026-10", 12);
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('local', 'localuser', 'x', '2026-07-10T09:00:00Z', '2026-07-10T09:00:00Z')").run();
+    const h = await monthlyHistory(makeCtx(), "2026-10");
     const sep = h.rows.find((r) => r.month === "2026-09")!;
     expect(sep).toMatchObject({ has_data: true, total: 1300 });
     expect(sep.by_category.groceries).toBe(1000);
@@ -119,7 +135,7 @@ describe("monthly_history (plan 10.2)", () => {
   });
 
   it("includes legacy totals, window totals, average and the month selector list", async () => {
-    const h = await monthlyHistory(makeCtx(), "2026-10", 12);
+    const h = await monthlyHistory(makeCtx(), "2026-10");
     const oct = h.rows[0]!;
     expect(oct).toMatchObject({ total: 9550, has_legacy: true });
     expect(oct.by_category.entertainment).toBe(1200);
@@ -133,9 +149,9 @@ describe("monthly_history (plan 10.2)", () => {
 describe("reconciliation: every view agrees (plan 10, M4)", () => {
   it("budget table, report and history give the same month totals", async () => {
     for (const month of ["2026-10", "2026-09"]) {
-      const status = await budgetStatus(env.DB, month);
+      const status = await budgetStatus(env.DB, TEST_USER, month);
       const report = await monthlyReport(makeCtx(), month);
-      const history = await monthlyHistory(makeCtx(), "2026-10", 12);
+      const history = await monthlyHistory(makeCtx(), "2026-10");
       const row = history.rows.find((r) => r.month === month)!;
       expect(report.total).toBe(status.total.spent);
       expect(row.total).toBe(status.total.spent);
@@ -145,9 +161,9 @@ describe("reconciliation: every view agrees (plan 10, M4)", () => {
 
   it("imported October alone matches the Excel total of 1,800", async () => {
     await resetDb();
-    await importLegacy(env.DB, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     expect((await monthlyReport(makeCtx(), "2026-10")).total).toBe(1800);
-    expect((await monthlyHistory(makeCtx(), "2026-10", 12)).rows[0]!.total).toBe(1800);
+    expect((await monthlyHistory(makeCtx(), "2026-10")).rows[0]!.total).toBe(1800);
   });
 });
 
@@ -171,7 +187,7 @@ describe("report routes", () => {
     expect((await get("/api/report?month=2026-10")).status).toBe(200);
     expect((await get("/api/report?month=2027-01")).status).toBe(400);
     const h = (await (await get("/api/history")).json()) as { rows: unknown[] };
-    expect(h.rows).toHaveLength(12);
+    expect(h.rows.map((r) => (r as { month: string }).month).slice(0, 2)).toHaveLength(2);
     expect((await get("/api/top?start_date=2026-10-01&end_date=2026-10-19&by=item")).status).toBe(200);
   });
 });

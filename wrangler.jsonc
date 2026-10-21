@@ -34,14 +34,20 @@
     // Cloudflare Access (docs/SECURITY.md). Fill both to require an Access JWT.
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    // Global rate limits protecting the free LLM quota. 0 disables a limit.
+    // Rate limits per account. 0 disables a limit.
     "CHAT_RATE_PER_MIN": "20",
-    "CHAT_RATE_PER_DAY": "500",
-    "API_RATE_PER_MIN": "300"
+    "CHAT_RATE_PER_DAY": "200",
+    "API_RATE_PER_MIN": "300",
+    // Messages per day, across ALL accounts, that may use the LLM (the shared free Groq quota).
+    "LLM_RATE_PER_DAY": "800",
+    // "off" closes sign-ups for new accounts (existing ones keep working).
+    "SIGNUP_OPEN": "on",
+    // Voice input: Groq Whisper (free: 2,000 clips a day). Clips per day for all accounts together.
+    "STT_MODEL": "whisper-large-v3-turbo",
+    "VOICE_RATE_PER_DAY": "1500"
   },
   "observability": { "enabled": true }
-  // Secrets (never in this file): LLM_API_KEY, APP_TOKEN
+  // Secret (never in this file): LLM_API_KEY
   //   npx wrangler secret put LLM_API_KEY
-  //   npx wrangler secret put APP_TOKEN
   // For local dev put them in .dev.vars (gitignored).
 }

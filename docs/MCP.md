@@ -4,11 +4,11 @@ The Worker serves a remote MCP server at `/mcp`. It exposes the same 11 tools th
 
 ## Connect a client
 
-Auth is the same as the rest of the API: `Authorization: Bearer <APP_TOKEN>`, or a Cloudflare Access service token if Access is in front (see below). Replace `<url>` with your deployed URL.
+Each account uses its own **personal API token**: in the app, open the user menu → **API token (MCP)** → Create token, and copy it (it's shown once). The token only reaches that account's data. Replace `<url>` with your deployed URL and `<token>` with yours.
 
 **Claude Code**
 ```bash
-claude mcp add --transport http expense-agent <url>/mcp --header "Authorization: Bearer <APP_TOKEN>"
+claude mcp add --transport http expense-agent <url>/mcp --header "Authorization: Bearer <token>"
 ```
 
 **Claude Desktop** (Settings → Developer → Edit config), through the `mcp-remote` bridge so a header can be sent:
@@ -17,8 +17,8 @@ claude mcp add --transport http expense-agent <url>/mcp --header "Authorization:
   "mcpServers": {
     "expense-agent": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "<url>/mcp", "--header", "Authorization: Bearer ${APP_TOKEN}"],
-      "env": { "APP_TOKEN": "<APP_TOKEN>" }
+      "args": ["-y", "mcp-remote", "<url>/mcp", "--header", "Authorization: Bearer ${EXPENSE_AGENT_TOKEN}"],
+      "env": { "EXPENSE_AGENT_TOKEN": "<token>" }
     }
   }
 }
@@ -28,7 +28,7 @@ claude mcp add --transport http expense-agent <url>/mcp --header "Authorization:
 ```bash
 node scripts/mcp-client.mjs <url>/mcp add "coffee" 45 food_dining
 ```
-Set the `APP_TOKEN` environment variable first. With no URL it talks to `http://localhost:8787/mcp` (`npm run dev`).
+Set the `EXPENSE_AGENT_TOKEN` environment variable to your token first. With no URL it talks to `http://localhost:8787/mcp` (`npm run dev`).
 
 **MCP Inspector**, for poking at it by hand:
 ```bash
@@ -36,7 +36,6 @@ npx @modelcontextprotocol/inspector
 ```
 Choose "Streamable HTTP", enter the URL, and add the Authorization header.
 
-**With Cloudflare Access in front:** create a service token (Zero Trust → Access → Service auth), add a "Service Auth" policy for it on the application, and have the client send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers. Access turns those into the JWT the Worker already verifies. Keep using `APP_TOKEN` for clients that can only send one header.
 
 ## What the server does
 

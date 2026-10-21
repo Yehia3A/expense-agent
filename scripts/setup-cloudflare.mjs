@@ -8,10 +8,12 @@
 //   2. Applies migrations to the remote database.
 //   3. Seeds your budgets and old spreadsheet totals from data/personal.json (if present).
 //   4. Deploys the Worker (static UI + API) to workers.dev.
-//   5. Sets the secrets: LLM_API_KEY (asks you) and APP_TOKEN (generated, shown once).
+//   5. Sets the LLM_API_KEY secret (asks you).
+// Accounts are created in the app itself (open sign-up). Your old data and
+// personal numbers are attached to your account afterwards with
+// `npm run claim:remote -- <username>`.
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 
 const DB_NAME = "expense_agent";
@@ -67,15 +69,9 @@ async function main() {
   step(2, "Migrations");
   run(["d1", "migrations", "apply", DB_NAME, "--remote"], { input: "y\n" });
 
-  // 3. Legacy totals.
-  step(3, "Your budgets and spreadsheet totals (data/personal.json)");
-  if (existsSync("data/personal.json")) {
-    const b = spawnSync("node", ["scripts/build-personal-sql.mjs"], { stdio: "inherit" });
-    if (b.status !== 0) throw new Error("data/personal.json did not validate");
-    run(["d1", "execute", DB_NAME, "--remote", "--file=.wrangler/personal_seed.sql"], { input: "y\n" });
-  } else {
-    console.log("No data/personal.json; skipping. Set budgets in the app instead.");
-  }
+  // 3. Personal numbers belong to an account, so they come after sign-up.
+  step(3, "Your budgets and spreadsheet totals");
+  console.log("After you create your account in the app, run: npm run claim:remote -- <your username>");
 
   // 4. Deploy (before secrets, so `secret put` targets an existing Worker).
   step(4, "Deploy");
@@ -92,18 +88,9 @@ async function main() {
   } else {
     console.log("LLM_API_KEY already set.");
   }
-  if (!existing.includes("APP_TOKEN")) {
-    const token = randomBytes(24).toString("base64url");
-    run(["secret", "put", "APP_TOKEN"], { input: token });
-    console.log("\nYour APP_TOKEN (save it in a password manager; it is not stored anywhere else):\n");
-    console.log(`    ${token}\n`);
-    console.log("The app asks for it once per browser.");
-  } else {
-    console.log("APP_TOKEN already set.");
-  }
   rl.close();
 
-  console.log("\nDone. Next: put Cloudflare Access in front of the app (docs/SECURITY.md).");
+  console.log("\nDone. Open the app, create your account, then run: npm run claim:remote -- <your username>");
 }
 
 main().catch((e) => {

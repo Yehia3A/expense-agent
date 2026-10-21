@@ -2,11 +2,13 @@
 // screen (sign in / first account) or the app with its Track, Report and
 // History views (#track, #report, #history).
 import { getMe, showWelcome, signOut } from "./auth.js";
-import { changePasswordDialog } from "./dialog.js";
+import { renderCategoryEditor } from "./categories.js";
+import { apiTokenDialog, categoriesDialog, changePasswordDialog, deleteAccountDialog } from "./dialog.js";
 import { initHistory, loadHistory } from "./history.js";
-import { $, api, cairoToday, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
+import { $, api, cairoToday, dataChanged, onDataChanged, state, toast, wireThemeToggles } from "./lib.js";
 import { initReport, loadReport, refreshReportMonths } from "./report.js";
 import { focusChat, initTrack, loadTrack } from "./track.js";
+import { initVoice } from "./drive.js";
 
 const VIEWS = {
   track: { load: loadTrack },
@@ -71,13 +73,54 @@ function wireUserMenu(username) {
     close();
     changePasswordDialog();
   });
+  $("#menu-token").addEventListener("click", async () => {
+    close();
+    const me = await getMe().catch(() => null);
+    apiTokenDialog(me?.api_token ?? null);
+  });
   $("#menu-signout").addEventListener("click", () => {
     close();
     signOut();
   });
+  $("#menu-delete").addEventListener("click", () => {
+    close();
+    deleteAccountDialog();
+  });
+}
+
+/** Keep the shared category list (pickers, names in tables) in step with the account's categories. */
+function useCategories(payload) {
+  state.categories = payload.categories.map((c) => ({ key: c.key, display_name: c.name }));
+}
+
+/** First time only: pick categories and budgets before the app opens (D41). */
+function runSetup(payload) {
+  return new Promise((resolve) => {
+    $("#boot").hidden = true;
+    $("#welcome").hidden = true;
+    $("#app").hidden = true;
+    $("#setup").hidden = false;
+    renderCategoryEditor($("#setup-editor"), payload, {
+      submitLabel: "Start tracking",
+      onSaved: (saved) => {
+        $("#setup").hidden = true;
+        resolve(saved);
+      },
+    });
+  });
 }
 
 async function startApp(me) {
+  let payload;
+  try {
+    payload = await api("/api/categories");
+  } catch (err) {
+    $("#boot-text").textContent = err.message;
+    return;
+  }
+  if (payload.needs_setup) payload = await runSetup(payload);
+  useCategories(payload);
+
   $("#boot").hidden = true;
   $("#welcome").hidden = true;
   $("#app").hidden = false;
@@ -86,12 +129,18 @@ async function startApp(me) {
   initTrack();
   initReport();
   initHistory();
-  try {
-    state.categories = await api("/api/categories");
-  } catch (err) {
-    toast(err.message);
-    return;
-  }
+  initVoice();
+  $("#edit-cats").addEventListener("click", async () => {
+    try {
+      categoriesDialog(await api("/api/categories"), (saved) => {
+        useCategories(saved);
+        toast("Categories saved.", "ok");
+        dataChanged();
+      });
+    } catch (err) {
+      toast(err.message);
+    }
+  });
   onDataChanged(() => {
     for (const v of Object.keys(VIEWS)) stale.add(v);
     show();

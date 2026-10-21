@@ -2,7 +2,7 @@
 # One-time setup in GitHub → Settings → Secrets and variables → Actions:
 #   CLOUDFLARE_API_TOKEN   (template "Edit Cloudflare Workers" + D1 Edit permission)
 #   CLOUDFLARE_ACCOUNT_ID  (Cloudflare dashboard → Workers & Pages → right sidebar)
-# Secrets the Worker itself needs (LLM_API_KEY, APP_TOKEN) are set once with
+# The secret the Worker itself needs (LLM_API_KEY) is set once with
 # `npm run setup:cloudflare` and persist across deploys.
 name: deploy
 

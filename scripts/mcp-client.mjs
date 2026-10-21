@@ -1,7 +1,7 @@
 // MCP client #2 (Phase 6): talks to the /mcp endpoint with the official SDK.
 //
 //   node scripts/mcp-client.mjs                       (local: http://localhost:8787/mcp)
-//   node scripts/mcp-client.mjs https://<your-app>/mcp    (APP_TOKEN env var for auth)
+//   node scripts/mcp-client.mjs https://<your-app>/mcp    (EXPENSE_AGENT_TOKEN env var: your personal API token)
 //   node scripts/mcp-client.mjs <url> add "coffee" 45 food_dining
 //
 // Lists the tools, shows this month's budget status, and with `add` records
@@ -10,7 +10,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const [url = "http://localhost:8787/mcp", cmd, note, amount, category] = process.argv.slice(2);
-const headers = process.env.APP_TOKEN ? { authorization: `Bearer ${process.env.APP_TOKEN}` } : {};
+// Create the token in the app: user menu -> API token.
+const token = process.env.EXPENSE_AGENT_TOKEN;
+const headers = token ? { authorization: `Bearer ${token}` } : {};
 
 const client = new Client({ name: "expense-agent-script", version: "1.0.0" });
 await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } }));

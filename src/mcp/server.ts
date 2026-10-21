@@ -33,7 +33,7 @@ const mcpAddExpense = defineTool({
   },
 });
 
-const READ_ONLY = new Set(["list_expenses", "summarize", "budget_status", "monthly_report", "top_spending", "monthly_history"]);
+const READ_ONLY = new Set(["list_expenses", "summarize", "budget_status", "monthly_report", "top_spending", "monthly_history", "list_categories"]);
 const DESTRUCTIVE = new Set(["delete_expense", "undo_request"]);
 const TITLES: Record<string, string> = {
   add_expense: "Add expenses",
@@ -47,6 +47,7 @@ const TITLES: Record<string, string> = {
   monthly_report: "Monthly report",
   top_spending: "Top spending",
   monthly_history: "Monthly history",
+  list_categories: "Your categories",
 };
 
 const MCP_TOOLS: Tool[] = TOOLS.map((t) => (t.name === "add_expense" ? (mcpAddExpense as Tool) : t));
@@ -86,9 +87,11 @@ const rpcError = (id: JsonRpcId, code: number, message: string, status = 200, da
 
 export interface McpDeps {
   now?: () => Date;
+  /** The account the caller's personal API token (or session) belongs to. */
+  userId: string;
 }
 
-export async function handleMcp(req: Request, env: Env, deps: McpDeps = {}): Promise<Response> {
+export async function handleMcp(req: Request, env: Env, deps: McpDeps): Promise<Response> {
   // Stateless server: no SSE stream to open (GET) and no session to end (DELETE).
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method not allowed" }), { status: 405, headers: { ...rpcHeaders, allow: "POST" } });
@@ -140,6 +143,7 @@ async function callMcpTool(env: Env, id: JsonRpcId, params: Record<string, unkno
   const started = Date.now();
   const ctx: ToolContext = {
     db: env.DB,
+    userId: deps.userId,
     now: deps.now ?? (() => new Date()),
     config: appConfig(env),
     requestId: ulid(),
@@ -159,10 +163,10 @@ async function callMcpTool(env: Env, id: JsonRpcId, params: Record<string, unkno
       : await callTool(ctx, name, args);
 
   await env.DB.prepare(
-    `INSERT INTO logs (id, request_id, ts, user_text, path, tool_calls, results, latency_ms, error)
-     VALUES (?, ?, ?, NULL, 'mcp', ?, ?, ?, ?)`,
+    `INSERT INTO logs (id, user_id, request_id, ts, user_text, path, tool_calls, results, latency_ms, error)
+     VALUES (?, ?, ?, ?, NULL, 'mcp', ?, ?, ?, ?)`,
   )
-    .bind(ulid(), ctx.requestId, new Date().toISOString(), JSON.stringify([{ name, args, ok: outcome.ok }]), JSON.stringify(outcome), Date.now() - started, outcome.ok ? null : outcome.error)
+    .bind(ulid(), ctx.userId, ctx.requestId, new Date().toISOString(), JSON.stringify([{ name, args, ok: outcome.ok }]), JSON.stringify(outcome), Date.now() - started, outcome.ok ? null : outcome.error)
     .run();
 
   // Tool failures are results with isError, so the calling model can read and fix them.

@@ -1,3 +1,4 @@
+import { userCategories } from "../tools/categories";
 import { lookupCategory } from "../tools/merchants";
 import type { CategoryKey } from "../tools/types";
 
@@ -81,12 +82,13 @@ export function parseFast(message: string): FastParse | null {
 }
 
 /** Parse and categorize; null unless every item has a cached category. */
-export async function fastPath(db: D1Database, message: string) {
+export async function fastPath(db: D1Database, userId: string, message: string) {
   const parsed = parseFast(message);
   if (!parsed) return null;
+  const allowed = new Set((await userCategories(db, userId)).map((c) => c.key));
   const items: { note: string; amount: number; category: CategoryKey; date_token?: string }[] = [];
   for (const it of parsed.items) {
-    const category = await lookupCategory(db, it.note);
+    const category = await lookupCategory(db, userId, it.note, allowed);
     if (!category) return null;
     items.push({ ...it, category, ...(parsed.date_token ? { date_token: parsed.date_token } : {}) });
   }

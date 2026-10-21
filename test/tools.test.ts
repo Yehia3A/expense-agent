@@ -6,7 +6,7 @@ import { budgetStatus, ensureBudgets } from "../src/tools/budgets";
 import { addExpenses, deleteExpense, undoRequest, updateExpense } from "../src/tools/expenses";
 import { callTool } from "../src/tools/registry";
 import type { ExpenseRow } from "../src/tools/types";
-import { cairo, makeCtx, resetDb } from "./helpers";
+import { cairo, makeCtx, resetDb, TEST_USER } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -149,7 +149,8 @@ describe("add_expense", () => {
     [{}],
   ])("rejects invalid input %j", async (args) => {
     const r = await callTool(makeCtx(), "add_expense", args);
-    expect(r.ok).toBe(false);
+    // Schema problems fail validation; an unknown category comes back as a readable error listing the valid ones.
+    expect(!r.ok || (r.result as { status: string }).status === "error").toBe(true);
     expect(await activeRows()).toHaveLength(0);
   });
 
@@ -235,26 +236,26 @@ describe("list / update / delete / undo", () => {
 describe("budgets", () => {
   it("copy-forward fills a new month from the latest earlier month", async () => {
     await setBudgets("2026-10", { groceries: 6000 });
-    await ensureBudgets(env.DB, "2026-12");
-    const dec = await budgetStatus(env.DB, "2026-12");
+    await ensureBudgets(env.DB, TEST_USER, "2026-12");
+    const dec = await budgetStatus(env.DB, TEST_USER, "2026-12");
     expect(dec.rows.find((r) => r.category === "groceries")!.budget).toBe(6000);
     expect(dec.rows.find((r) => r.category === "other")!.budget).toBe(10000);
   });
 
   it("never copies backwards: months before the first budget month are untracked", async () => {
-    const aug = await budgetStatus(env.DB, "2026-08");
+    const aug = await budgetStatus(env.DB, TEST_USER, "2026-08");
     expect(aug.rows.every((r) => r.budget === null)).toBe(true);
     const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM budgets WHERE month = '2026-08'").first<{ n: number }>();
     expect(count?.n).toBe(0);
   });
 
   it("set_budget applies forward to later existing months but never to earlier ones (D4)", async () => {
-    await ensureBudgets(env.DB, "2026-11");
-    await ensureBudgets(env.DB, "2026-12");
+    await ensureBudgets(env.DB, TEST_USER, "2026-11");
+    await ensureBudgets(env.DB, TEST_USER, "2026-12");
     const r = await callTool(makeCtx(), "set_budget", { category: "groceries", amount: 7000, month: "2026-11" });
     expect((r as { result: { later_months_updated: number } }).result.later_months_updated).toBe(1);
     const b = async (m: string) =>
-      (await budgetStatus(env.DB, m)).rows.find((x) => x.category === "groceries")!.budget;
+      (await budgetStatus(env.DB, TEST_USER, m)).rows.find((x) => x.category === "groceries")!.budget;
     expect(await b("2026-10")).toBeNull();
     expect(await b("2026-11")).toBe(7000);
     expect(await b("2026-12")).toBe(7000);
@@ -273,7 +274,7 @@ describe("budgets", () => {
     ]);
     await addExpenses(makeCtx(), [{ amount: 300, category: "food_dining", note: "sept lunch", date_token: "date:2026-09-30" }]);
 
-    const s = await budgetStatus(env.DB, "2026-10");
+    const s = await budgetStatus(env.DB, TEST_USER, "2026-10");
     const food = s.rows.find((r) => r.category === "food_dining")!;
     expect(food).toMatchObject({ budget: 500, spent: 600, remaining: -100, prev_spent: 300, pct_used: 120 });
     const shopping = s.rows.find((r) => r.category === "shopping")!;
@@ -295,9 +296,9 @@ describe("budgets", () => {
   });
 
   it("distinguishes 'no data' from a true zero", async () => {
-    expect((await budgetStatus(env.DB, "2026-09")).has_data).toBe(false);
+    expect((await budgetStatus(env.DB, TEST_USER, "2026-09")).has_data).toBe(false);
     await addExpenses(makeCtx(), [{ amount: 5, category: "food_dining", note: "x", date_token: "date:2026-09-30" }]);
-    expect((await budgetStatus(env.DB, "2026-09")).has_data).toBe(true);
+    expect((await budgetStatus(env.DB, TEST_USER, "2026-09")).has_data).toBe(true);
   });
 
   it("excludes deleted rows and non-EGP amounts from spent", async () => {
@@ -308,7 +309,7 @@ describe("budgets", () => {
     ]);
     if (r.status !== "saved") throw new Error("expected saved");
     await deleteExpense(makeCtx(), r.saved[1]!.id);
-    const s = await budgetStatus(env.DB, "2026-10");
+    const s = await budgetStatus(env.DB, TEST_USER, "2026-10");
     expect(s.rows.find((x) => x.category === "food_dining")!.spent).toBe(100);
     expect(s.other_currencies).toEqual([{ currency: "USD", total: 20 }]);
   });
@@ -316,9 +317,9 @@ describe("budgets", () => {
 
 describe("legacy import (plan 8.1)", () => {
   it("October reconciles with the Excel total of 1,800", async () => {
-    const n = await importLegacy(env.DB, legacyData as LegacyData);
+    const n = await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     expect(n).toBeGreaterThan(0);
-    const oct = await budgetStatus(env.DB, "2026-10");
+    const oct = await budgetStatus(env.DB, TEST_USER, "2026-10");
     expect(oct.total.spent).toBe(1800);
     expect(oct.rows.find((r) => r.category === "transport_fuel")!.spent).toBe(600);
     expect(oct.rows.find((r) => r.category === "entertainment")!.spent).toBe(1200);
@@ -337,27 +338,27 @@ describe("legacy import (plan 8.1)", () => {
     expect(() => legacyRows({ months: { "2026-09": { other: 900 } }, expected_totals: { "2026-09": 1000 } })).toThrow(
       /sum to 900/,
     );
-    expect(() => legacyRows({ months: { "2026-09": { pets: 1 } }, expected_totals: {} })).toThrow(/unknown category/);
+    expect(() => legacyRows({ months: { "2026-09": { "Pets!": 1 } }, expected_totals: {} })).toThrow(/bad category key/);
   });
 
   it("re-import is idempotent and legacy totals add to real expenses in the same month (D9)", async () => {
-    await importLegacy(env.DB, legacyData as LegacyData);
-    await importLegacy(env.DB, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     await addExpenses(makeCtx(), [{ amount: 100, category: "entertainment", note: "cinema" }]);
-    const oct = await budgetStatus(env.DB, "2026-10");
+    const oct = await budgetStatus(env.DB, TEST_USER, "2026-10");
     expect(oct.rows.find((r) => r.category === "entertainment")!.spent).toBe(1300);
     expect(oct.total.spent).toBe(1900);
   });
 
   it("legacy totals never become fake transactions", async () => {
-    await importLegacy(env.DB, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     expect(await activeRows()).toHaveLength(0);
   });
 });
 
 describe("summarize", () => {
   it("groups by category, sorted by total, with shares and legacy months fully inside the range", async () => {
-    await importLegacy(env.DB, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     await addExpenses(makeCtx(), [
       { amount: 200, category: "food_dining", note: "coffee" },
       { amount: 400, category: "groceries", note: "vegs" },
@@ -375,7 +376,7 @@ describe("summarize", () => {
   });
 
   it("partial months exclude legacy totals; group by day is chronological", async () => {
-    await importLegacy(env.DB, legacyData as LegacyData);
+    await importLegacy(env.DB, TEST_USER, legacyData as LegacyData);
     await addExpenses(makeCtx(), [
       { amount: 5, category: "food_dining", note: "x", date_token: "date:2026-10-18" },
       { amount: 7, category: "food_dining", note: "y", date_token: "date:2026-10-05" },

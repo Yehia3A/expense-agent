@@ -15,10 +15,12 @@
     "cf-typegen": "wrangler types",
     "vendor:chart": "node -e \"require('fs').copyFileSync('node_modules/chart.js/dist/chart.umd.min.js','public/vendor/chart.umd.min.js')\"",
     "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
-    "db:seed-personal:local": "node scripts/build-personal-sql.mjs && wrangler d1 execute expense_agent --local --file=.wrangler/personal_seed.sql",
-    "db:seed-personal:remote": "node scripts/build-personal-sql.mjs && wrangler d1 execute expense_agent --remote --file=.wrangler/personal_seed.sql",
     "eval": "node scripts/eval.mjs",
-    "mcp:client": "node scripts/mcp-client.mjs"
+    "mcp:client": "node scripts/mcp-client.mjs",
+    "claim:local": "node scripts/claim.mjs --local",
+    "claim:remote": "node scripts/claim.mjs --remote",
+    "reset-password:local": "node scripts/reset-password.mjs --local",
+    "reset-password:remote": "node scripts/reset-password.mjs --remote"
   },
   "dependencies": {
     "zod": "4.6.7"

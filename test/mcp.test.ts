@@ -61,9 +61,10 @@ describe("MCP lifecycle (Streamable HTTP, stateless)", () => {
 });
 
 describe("MCP tools (one tool layer, plan 6)", () => {
-  it("lists all 11 tools with JSON Schemas and annotations", async () => {
+  it("lists all 12 tools with JSON Schemas and annotations", async () => {
     const tools = (await rpc("tools/list")).body.result.tools as { name: string; inputSchema: { type: string }; annotations: { readOnlyHint: boolean } }[];
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(12);
+    expect(tools.find((t) => t.name === "list_categories")!.annotations.readOnlyHint).toBe(true);
     expect(tools.every((t) => t.inputSchema.type === "object")).toBe(true);
     expect(tools.find((t) => t.name === "budget_status")!.annotations.readOnlyHint).toBe(true);
     expect(tools.find((t) => t.name === "add_expense")!.annotations.readOnlyHint).toBe(false);
@@ -112,9 +113,9 @@ describe("MCP tools (one tool layer, plan 6)", () => {
 });
 
 describe("MCP auth", () => {
-  it("needs APP_TOKEN (or Access) like the rest of the API", async () => {
-    const locked = { ...env, APP_TOKEN: "mcp-secret" };
-    expect((await rpc("ping", undefined, { e: locked })).status).toBe(401);
-    expect((await rpc("ping", undefined, { e: locked, headers: { authorization: "Bearer mcp-secret" } })).status).toBe(200);
+  it("needs a personal API token (or a session) once accounts exist", async () => {
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('u1', 'someone', 'x', 'now', 'now')").run();
+    expect((await rpc("ping")).status).toBe(401);
+    expect((await rpc("ping", undefined, { headers: { authorization: "Bearer ea_not_a_real_token_at_all_xxxxxxxxxx" } })).status).toBe(401);
   });
 });

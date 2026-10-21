@@ -1,70 +1,56 @@
-# Security (Phase 3)
+# Security
+
+ExpenseAgent is a public app: anyone can create an account. The job of the security layer is that **each account only ever reaches its own data**, that guessing passwords or flooding sign-ups doesn't work, and that the shared free quotas can't be drained.
 
 ## What protects what
 
 | Layer | Protects | How |
 |---|---|---|
-| Cloudflare Access | Everything: UI, `/api`, `/chat` | Login wall at Cloudflare's edge. Only your email gets in. |
-| Access JWT check in the Worker | `/api`, `/chat` | Every request must carry a valid Access JWT (signature, issuer, audience, expiry). The raw `workers.dev` URL and any route Access doesn't cover are refused. `src/security/access.ts` |
-| Username + password | Browser | PBKDF2-SHA256 hashes, a 30-day sliding session in an HttpOnly, Secure, SameSite=Strict cookie, only the session's SHA-256 stored. Sign-in is rate-limited per IP. Changing the password signs out other devices. |
-| `APP_TOKEN` | `/api`, `/chat`, `/mcp` | `Authorization: Bearer` for scripts and MCP clients; also the one-time setup key for the first account. Compared in constant time. |
-| Fail-closed default | `/api`, `/chat` | With no Access, no `APP_TOKEN` and no account yet, only `localhost` is served. A deployed Worker answers 503 instead of running open. |
-| Rate limits | LLM quota, D1 | Global fixed windows in D1: `/chat` 20/min and 500/day, whole API 300/min (vars in `wrangler.jsonc`). 429 with `Retry-After`. |
+| Per-account data | Everyone's expenses | Every row of personal data (expenses, budgets, spreadsheet totals, learned words, logs) carries its owner's id, and every query filters on the signed-in account. Tests in `test/isolation.test.ts` check that another account's data can't be listed, reported, edited, deleted, undone, replayed through chat or reached with an MCP token, even with its ids. |
+| Passwords | Accounts | PBKDF2-SHA256 with a random salt (20,000 iterations, limited by the free plan's CPU; see Known limits). Only the hash is stored. Unknown usernames take as long as wrong passwords. |
+| Sessions | Browsers | Random 256-bit token in an HttpOnly, Secure, SameSite=Strict cookie, valid 30 days and sliding with use. Only its SHA-256 is stored. Changing the password signs out other devices; signing out deletes the session. |
+| Personal API tokens | `/api`, `/chat`, `/mcp` from scripts and MCP clients | One per account, created in the user menu and shown once. Only the SHA-256 is stored. A new token replaces the old one, and it can be revoked. Creating one needs a browser sign-in, not another token. |
+| Brute-force limits | Sign-in, password checks | 10 tries per 15 minutes per IP, 300 per hour overall. |
+| Sign-up limits | D1 quota, bots | 5 new accounts per IP per day, 300 per day overall. `SIGNUP_OPEN = "off"` closes sign-ups. |
+| Usage limits | Groq and Cloudflare quotas | Per account: 20 chat messages a minute and 200 a day, 300 API calls a minute. All accounts together: 800 messages a day may use the LLM; the fast path doesn't count. |
 | CSRF guard | Writes | Cross-origin `Origin`, `Sec-Fetch-Site: cross-site` and non-JSON bodies are refused (403). No CORS headers are ever sent. |
 | Headers | UI and API | Strict CSP (`'self'` only, no inline script or style), `frame-ancestors 'none'`, `nosniff`, `no-referrer` (`public/_headers` and API responses). |
-| Secrets | API keys | Only in Worker secrets / `.dev.vars` (gitignored). Logs store your message text, never keys. |
+| Secrets | Groq key | Only in Cloudflare secrets / `.dev.vars` (gitignored), never sent to browsers. Logs keep message text, never keys. |
+| Account deletion | Users' privacy | "Delete account" in the user menu (password required) removes the account and every row of its data. |
+| Optional: Cloudflare Access | A private deployment | If you set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, every API call must also pass Cloudflare Access (a login wall at Cloudflare's edge). Don't use this for the public app: it would lock everyone else out. |
 
-## Set up Cloudflare Access (once, about 10 minutes)
+## Forgot a password?
 
-1. Deploy once (see README). Note the URL, e.g. `expense-agent.<you>.workers.dev`.
-2. Cloudflare dashboard → **Zero Trust** (free plan for up to 50 users). Pick a team name; your team domain is `<team>.cloudflareaccess.com`.
-3. **Access → Applications → Add an application → Self-hosted.** Domain: your workers.dev hostname (or custom domain). Session duration: 1 month is fine for a personal app.
-   - Shortcut: Workers & Pages → your Worker → Settings → Domains & Routes → workers.dev → **Enable Cloudflare Access** creates this application for you.
-4. Policy: **Allow**, Include → Emails → your email. Login method: One-time PIN (default) or Google.
-5. Copy the application's **Audience (AUD) tag** (Application → Overview / Additional settings).
-6. Put both values in `wrangler.jsonc` → `vars`:
-   ```jsonc
-   "ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
-   "ACCESS_AUD": "<aud tag>"
-   ```
-7. `npm run deploy`.
-
-Keep `APP_TOKEN` set as well if you want to call the API from scripts or a future MCP client; otherwise it can be removed with `npx wrangler secret delete APP_TOKEN`.
-
-## Forgot your password?
-
-There is no email reset (there is no email). Delete the account; your expenses stay, only the login goes. Then open the app and create it again with the APP_TOKEN as setup key:
+There's no email, so there's no self-service reset. The owner, who has the Cloudflare login, can set a temporary password:
 
 ```bash
-npx.cmd wrangler d1 execute expense_agent --remote --command "DELETE FROM sessions; DELETE FROM users;"
+npm run reset-password:remote -- <username>
 ```
 
-Forgot the APP_TOKEN too? Set a new one first with `npx.cmd wrangler secret put APP_TOKEN`.
+It prints a temporary password and signs that account out everywhere; the data stays. The person signs in with it and changes it from the user menu (Change password).
 
-## Manual checklist (run after every auth change)
+## Manual checklist (after any auth change)
 
 Replace `$URL` with your deployed URL.
 
-- [ ] Private browser window → `$URL` → Access login page appears; after login the app loads.
-- [ ] Unauthenticated API call is refused (expect 401, or 302 to the Access login if Access sits in front):
+- [ ] A private browser window shows the welcome page. Sign up works with only a username and password.
+- [ ] Data calls without a sign-in are refused (expect 401):
   ```bash
-  curl -i "$URL/api/health"
+  curl -i "$URL/api/budget-status"
   ```
-- [ ] Forged Access header is refused (expect 401):
-  ```bash
-  curl -i -H "cf-access-jwt-assertion: a.b.c" "$URL/api/health"
-  ```
-- [ ] If you use a custom domain, the raw `workers.dev` URL is also refused (or disable it: `"workers_dev": false` in `wrangler.jsonc`).
+- [ ] A second account sees none of the first account's expenses.
 - [ ] Cross-site write is refused (expect 403):
   ```bash
-  curl -i -X PUT -H "content-type: application/json" -H "origin: https://evil.example" -H "authorization: Bearer $APP_TOKEN" -d '{"category":"groceries","amount":1}' "$URL/api/budgets"
+  curl -i -X POST -H "content-type: application/json" -H "origin: https://evil.example" -d '{"username":"x1234","password":"long enough pass"}' "$URL/api/auth/signup"
   ```
-- [ ] Rate limit trips: send 21 chat messages within a minute; the 21st gets "rate limit reached".
-- [ ] `npx wrangler secret list` shows only names (`LLM_API_KEY`, `APP_TOKEN`), and `git grep -n "gsk_\|sk-or-"` finds nothing.
+- [ ] Wrong passwords: the 11th try within 15 minutes gets "Too many sign-in attempts".
+- [ ] `npx wrangler secret list` shows only the name `LLM_API_KEY`, and `git grep -n "gsk_\|sk-or-"` finds nothing.
 - [ ] Response headers on `$URL/` include `content-security-policy` and `x-frame-options: DENY`.
+- [ ] Your Cloudflare account has two-factor authentication on (dash.cloudflare.com → My Profile → Authentication). Whoever controls it controls the database.
 
 ## Known limits
 
-- Rate limits are global, not per user, because there is one user. Abuse from a stolen session still hits the same caps, which protects the LLM quota.
-- The static UI is public if Access is not set up; it contains no data, and every data call is authenticated.
-- `/mcp` (Phase 6) will need its own auth (Access service token or `APP_TOKEN`).
+- **Password hashing is lighter than ideal** (20,000 PBKDF2 rounds instead of 600,000) because the free plan allows 10 ms of CPU per request. Over the internet, guessing is stopped by the rate limits. The lighter hashing only matters if someone copied the database, which takes your Cloudflare account: protect it with two-factor authentication. On a paid plan, raise `DEFAULT_ITERATIONS` in `src/security/passwords.ts`; old hashes keep working.
+- **Shared quotas can be used up.** A burst of new users, or someone creating many accounts from many networks, can use up the day's LLM quota (simple messages keep working), the sign-up allowance or Cloudflare's free daily requests. Nothing is billed; the app recovers the next day. If it happens a lot, close sign-ups (`SIGNUP_OPEN = "off"`) or add a CAPTCHA (Cloudflare Turnstile is free).
+- **No email**, so no password-reset emails; see "Forgot a password?".
+- **Privacy:** people's spending notes are stored in your Cloudflare D1 database and sent to Groq when the AI handles a message. Voice clips go to Groq for transcription and are not stored; only the resulting text is logged. The microphone is only used while the mic button is active, and only on this site (`Permissions-Policy: microphone=(self)`). If you invite others, tell them so. Each account can delete everything it stored.

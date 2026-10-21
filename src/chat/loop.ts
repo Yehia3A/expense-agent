@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { appConfig, type Env } from "../env";
+import { appConfig, type Env, rateLimits } from "../env";
 import { localDate } from "../lib/dates";
 import { ulid } from "../lib/ulid";
+import { checkLimits } from "../security/ratelimit";
+import { hintFor, userCategories } from "../tools/categories";
 import { addExpenses } from "../tools/expenses";
 import { callTool, toolJsonSchemas, type ToolOutcome } from "../tools/registry";
 import type { ExpenseRow, ToolContext } from "../tools/types";
@@ -55,20 +57,20 @@ export interface ChatDeps {
  * One /chat request: the LLM picks tools, code runs them. Every date, total and
  * status line comes from code; the model only chooses and fills tools (plan 9).
  */
-export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): Promise<ChatResponse> {
+export async function runChat(env: Env, userId: string, req: ChatRequest, deps: ChatDeps = {}): Promise<ChatResponse> {
   const now = deps.now ?? (() => new Date());
   const started = Date.now();
 
   // D12: a retry with the same request_id replays the stored response.
   const prior = await env.DB.prepare(
-    "SELECT response FROM logs WHERE request_id = ? AND response IS NOT NULL ORDER BY ts DESC LIMIT 1",
+    "SELECT response FROM logs WHERE user_id = ? AND request_id = ? AND response IS NOT NULL ORDER BY ts DESC LIMIT 1",
   )
-    .bind(req.request_id)
+    .bind(userId, req.request_id)
     .first<{ response: string }>();
   if (prior) return { ...(JSON.parse(prior.response) as ChatResponse), replayed: true };
 
   const config = appConfig(env);
-  const ctx: ToolContext = { db: env.DB, now, config, requestId: req.request_id, source: "chat", lineCounter: { next: 0 } };
+  const ctx: ToolContext = { db: env.DB, userId, now, config, requestId: req.request_id, source: "chat", lineCounter: { next: 0 } };
   const out: ChatResponse = {
     request_id: req.request_id,
     reply: "",
@@ -84,7 +86,7 @@ export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): 
 
   // Paths A + C: a plain "item amount, ..." message whose items are all in the
   // merchant cache is saved without calling the LLM.
-  const fast = env.FAST_PATH === "off" ? null : await fastPath(env.DB, req.message);
+  const fast = env.FAST_PATH === "off" ? null : await fastPath(env.DB, userId, req.message);
   if (fast) {
     out.path = "fast";
     const r = await addExpenses(ctx, fast);
@@ -111,11 +113,12 @@ export async function runChat(env: Env, req: ChatRequest, deps: ChatDeps = {}): 
   // in which case a retry should simply try again.
   const cacheable = !out.error || out.changed;
   await env.DB.prepare(
-    `INSERT INTO logs (id, request_id, ts, user_text, path, model, tool_calls, results, latency_ms, error, response)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO logs (id, user_id, request_id, ts, user_text, path, model, tool_calls, results, latency_ms, error, response)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       ulid(),
+      userId,
       req.request_id,
       new Date().toISOString(),
       req.message,
@@ -184,12 +187,7 @@ async function runLlm(
     }
   };
 
-  const categories = (
-    await env.DB.prepare("SELECT key, display_name FROM categories WHERE is_active = 1 ORDER BY sort_order").all<{
-      key: string;
-      display_name: string;
-    }>()
-  ).results;
+  const categories = (await userCategories(env.DB, ctx.userId)).map((c) => ({ key: c.key, display_name: c.name, hint: hintFor(c.key) }));
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, ctx.config.largeAmountThreshold) },
     ...req.history,
@@ -197,6 +195,12 @@ async function runLlm(
   ];
   const tools = toolJsonSchemas();
   const deadline = AbortSignal.timeout(DEADLINE_MS);
+
+  // The free LLM quota is shared by every account: cap how many messages a day may use it.
+  const quota = await checkLimits(env.DB, [{ bucket: "llm:all:day", windowSec: 86400, max: rateLimits(env).llmPerDay }], ctx.now().getTime());
+  if (!quota.ok) {
+    throw new LlmError("the shared AI quota for today is used up; plain messages like 'coffee 200' still work", 429);
+  }
 
   for (let i = 0; ; i++) {
     if (i >= MAX_ITERATIONS) {

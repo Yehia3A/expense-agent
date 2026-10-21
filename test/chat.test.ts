@@ -4,7 +4,7 @@ import { MAX_ITERATIONS, runChat } from "../src/chat/loop";
 import type { ChatMessage, ToolCall } from "../src/chat/llm";
 import worker from "../src/index";
 import type { ExpenseRow } from "../src/tools/types";
-import { cairo, NOW, resetDb } from "./helpers";
+import { cairo, NOW, resetDb, TEST_USER } from "./helpers";
 
 beforeEach(resetDb);
 
@@ -50,7 +50,7 @@ describe("/chat tool-calling loop", () => {
       },
       { content: "Saved coffee and vegs." },
     ]);
-    const res = await runChat(env, { message: "coffee 200, vegs 400", request_id: "req-chat-001", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "coffee 200, vegs 400", request_id: "req-chat-001", history: [] }, deps(llm));
 
     expect(res.reply).toBe("Saved coffee and vegs.");
     expect(res.changed).toBe(true);
@@ -90,7 +90,7 @@ describe("/chat tool-calling loop", () => {
       { content: "ok" },
     ]);
     const late = cairo("2026-10-20T00:01", 3); // 21:01 UTC on Oct 19
-    const res = await runChat(env, { message: "tea 50", request_id: "req-chat-date", history: [] }, deps(llm, late));
+    const res = await runChat(env, TEST_USER, { message: "tea 50", request_id: "req-chat-date", history: [] }, deps(llm, late));
     expect(res.saved[0]!.expense_date).toBe("2026-10-20");
   });
 
@@ -100,9 +100,9 @@ describe("/chat tool-calling loop", () => {
       { content: "Saved." },
     ]);
     const req = { message: "coffee 200", request_id: "req-chat-retry", history: [] };
-    const a = await runChat(env, req, deps(llm));
+    const a = await runChat(env, TEST_USER, req, deps(llm));
     const callsAfterFirst = llm.calls();
-    const b = await runChat(env, req, deps(llm));
+    const b = await runChat(env, TEST_USER, req, deps(llm));
     expect(llm.calls()).toBe(callsAfterFirst);
     expect(b.replayed).toBe(true);
     expect(b.saved.map((s) => s.id)).toEqual(a.saved.map((s) => s.id));
@@ -111,7 +111,7 @@ describe("/chat tool-calling loop", () => {
 
   it("non-expense messages never write", async () => {
     const llm = scriptedLlm([{ content: "Hi! Tell me what you spent." }]);
-    const res = await runChat(env, { message: "hello", request_id: "req-chat-hello", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "hello", request_id: "req-chat-hello", history: [] }, deps(llm));
     expect(res).toMatchObject({ reply: "Hi! Tell me what you spent.", saved: [], changed: false, pending: null });
     expect(await rows()).toHaveLength(0);
   });
@@ -128,7 +128,7 @@ describe("/chat tool-calling loop", () => {
       },
       { content: "That's a big one: press Confirm to save." },
     ]);
-    const res = await runChat(env, { message: "tv 15000, water 30", request_id: "req-chat-big", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "tv 15000, water 30", request_id: "req-chat-big", history: [] }, deps(llm));
     expect(res.saved).toEqual([]);
     expect(res.changed).toBe(false);
     expect(res.pending?.request_id).toBe("req-chat-big:confirm");
@@ -160,7 +160,7 @@ describe("/chat tool-calling loop", () => {
       { tool_calls: [{ name: "add_expense", args: { items: [{ amount: 85, category: "transport_fuel", note: "uber", date_token: "yesterday" }] } }] },
       { content: "Saved." },
     ]);
-    const res = await runChat(env, { message: "uber 85 yesterday", request_id: "req-chat-badjson", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "uber 85 yesterday", request_id: "req-chat-badjson", history: [] }, deps(llm));
     expect(JSON.parse((llm.requests[1]!.messages.at(-1) as { content: string }).content)).toMatchObject({
       ok: false,
       error: "arguments were not valid JSON",
@@ -173,14 +173,16 @@ describe("/chat tool-calling loop", () => {
       { tool_calls: [{ name: "add_expense", args: { items: [{ amount: 10, category: "pets", note: "cat food" }] } }] },
       { content: "Which category is cat food?" },
     ]);
-    const res = await runChat(env, { message: "cat food 10", request_id: "req-chat-badcat", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "cat food 10", request_id: "req-chat-badcat", history: [] }, deps(llm));
     expect(res.saved).toEqual([]);
-    expect(JSON.parse((llm.requests[1]!.messages.at(-1) as { content: string }).content).ok).toBe(false);
+    const back = JSON.parse((llm.requests[1]!.messages.at(-1) as { content: string }).content);
+    expect(back.result.status).toBe("error");
+    expect(back.result.errors[0]).toMatch(/unknown category 'pets'.*Groceries \(groceries\)/);
   });
 
   it("stops at the iteration cap", async () => {
     const llm = scriptedLlm([{ tool_calls: [{ name: "budget_status", args: {} }] }]);
-    const res = await runChat(env, { message: "loop forever", request_id: "req-chat-loop", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "loop forever", request_id: "req-chat-loop", history: [] }, deps(llm));
     expect(llm.calls()).toBe(MAX_ITERATIONS);
     expect(res.error).toBe("iteration cap reached");
   });
@@ -189,22 +191,22 @@ describe("/chat tool-calling loop", () => {
     const llm = scriptedLlm([{ status: 429 }]);
     const req = { message: "coffee 200", request_id: "req-chat-429", history: [] };
     const noFallback = { ...env, LLM_FALLBACK_MODEL: "" };
-    const res = await runChat(noFallback, req, deps(llm));
+    const res = await runChat(noFallback, TEST_USER, req, deps(llm));
     expect(res.error).toMatch(/rate limit/);
     expect(res.reply).toMatch(/Nothing was saved/);
-    await runChat(noFallback, req, deps(llm));
+    await runChat(noFallback, TEST_USER, req, deps(llm));
     expect(llm.calls()).toBe(2);
   });
 
   it("retries once on a 5xx", async () => {
     const llm = scriptedLlm([{ status: 503 }, { content: "Hi" }]);
-    const res = await runChat(env, { message: "hi", request_id: "req-chat-503", history: [] }, deps(llm));
+    const res = await runChat(env, TEST_USER, { message: "hi", request_id: "req-chat-503", history: [] }, deps(llm));
     expect(res.reply).toBe("Hi");
   });
 
   it("explains a missing API key", async () => {
     const llm = scriptedLlm([{ content: "unused" }]);
-    const res = await runChat({ ...env, LLM_API_KEY: "" }, { message: "hi", request_id: "req-chat-nokey", history: [] }, deps(llm));
+    const res = await runChat({ ...env, LLM_API_KEY: "" }, TEST_USER, { message: "hi", request_id: "req-chat-nokey", history: [] }, deps(llm));
     expect(res.error).toMatch(/LLM_API_KEY/);
     expect(llm.calls()).toBe(0);
   });
@@ -214,17 +216,16 @@ describe("/chat tool-calling loop", () => {
       { tool_calls: [{ name: "add_expense", args: { items: [{ amount: 200, category: "food_dining", note: "coffee" }] } }] },
       { content: "Saved." },
     ]);
-    await runChat(env, { message: "coffee 200", request_id: "req-chat-u1", history: [] }, deps(add));
+    await runChat(env, TEST_USER, { message: "coffee 200", request_id: "req-chat-u1", history: [] }, deps(add));
     const undo = scriptedLlm([{ tool_calls: [{ name: "undo_request", args: {} }] }, { content: "Undone." }]);
-    const res = await runChat(env, { message: "undo that", request_id: "req-chat-u2", history: [] }, deps(undo));
+    const res = await runChat(env, TEST_USER, { message: "undo that", request_id: "req-chat-u2", history: [] }, deps(undo));
     expect(res.changed).toBe(true);
     expect(await rows()).toHaveLength(0);
   });
 
   it("passes the short history so follow-up answers have context", async () => {
     const llm = scriptedLlm([{ content: "ok" }]);
-    await runChat(
-      env,
+    await runChat(env, TEST_USER,
       {
         message: "200",
         request_id: "req-chat-hist",
@@ -242,12 +243,11 @@ describe("/chat tool-calling loop", () => {
 describe("HTTP routes", () => {
   const call = (path: string, init: RequestInit = {}, e: typeof env = env) => worker.fetch(new Request(`http://localhost${path}`, { ...init, headers: { "content-type": "application/json", ...(init.headers as Record<string, string>) } }), e);
 
-  it("APP_TOKEN guards /api and /chat when set (D14)", async () => {
-    const locked = { ...env, APP_TOKEN: "s3cret-token" };
-    expect((await call("/api/health", {}, locked)).status).toBe(401);
-    expect((await call("/chat", { method: "POST", body: "{}" }, locked)).status).toBe(401);
-    expect((await call("/api/health", { headers: { authorization: "Bearer wrong" } }, locked)).status).toBe(401);
-    expect((await call("/api/health", { headers: { authorization: "Bearer s3cret-token" } }, locked)).status).toBe(200);
+  it("once an account exists, /api and /chat need a sign-in even on localhost", async () => {
+    await env.DB.prepare("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('u1', 'someone', 'x', 'now', 'now')").run();
+    expect((await call("/api/budget-status")).status).toBe(401);
+    expect((await call("/chat", { method: "POST", body: "{}" })).status).toBe(401);
+    expect((await call("/api/budget-status", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
   });
 
   it("validates /chat bodies", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { addDays, addMonths, daysBetween, isValidMonth, isValidYmd, monthOf, monthRange } from "../lib/dates";
+import { addDays, addMonths, daysBetween, isValidMonth, isValidYmd, localDate, monthOf, monthRange } from "../lib/dates";
 import { BASE_CURRENCY, budgetStatus } from "./budgets";
+import { userCategories } from "./categories";
 import { summarizeTool } from "./reports";
 import { defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
 
@@ -30,9 +31,9 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
   const isCurrent = month === current;
   const daysElapsed = isCurrent ? Number(t.slice(8, 10)) : daysInMonth;
 
-  const status = await budgetStatus(ctx.db, month);
-  const live = "deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?";
-  const args = [BASE_CURRENCY, start, end];
+  const status = await budgetStatus(ctx.db, ctx.userId, month);
+  const live = "user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?";
+  const args = [ctx.userId, BASE_CURRENCY, start, end];
   const [topRows, items, days, review] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db.prepare(`SELECT * FROM expenses WHERE ${live} ORDER BY amount DESC, expense_date DESC LIMIT 5`).bind(...args),
     ctx.db
@@ -41,10 +42,10 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
     ctx.db.prepare(`SELECT expense_date AS date, SUM(amount) AS total FROM expenses WHERE ${live} GROUP BY expense_date`).bind(...args),
     ctx.db
       .prepare(
-        `SELECT * FROM expenses WHERE deleted_at IS NULL AND needs_review = 1 AND expense_date >= ? AND expense_date < ?
+        `SELECT * FROM expenses WHERE user_id = ? AND deleted_at IS NULL AND needs_review = 1 AND expense_date >= ? AND expense_date < ?
          ORDER BY expense_date DESC, id DESC`,
       )
-      .bind(start, end),
+      .bind(ctx.userId, start, end),
   ]);
 
   const itemRows = (items!.results as { item: string; total: number; count: number }[]).map((r) => ({ ...r, total: round2(r.total) }));
@@ -112,30 +113,52 @@ export const monthlyReportTool = defineTool({
   },
 });
 
-export async function monthlyHistory(ctx: ToolContext, endMonth: string, count: number) {
+/**
+ * Month-by-month spending for the History view. It starts when the account
+ * did (D42): the sign-up month and the month before it ("the last 2 months"),
+ * reaching further back only for months that actually have records (e.g.
+ * imported spreadsheet totals or back-dated expenses). Newest first.
+ */
+export async function monthlyHistory(ctx: ToolContext, endMonth: string, maxMonths = 24) {
   checkMonth(ctx, endMonth);
-  const months = Array.from({ length: count }, (_, i) => addMonths(endMonth, -i)); // newest first
-  const oldest = months[months.length - 1]!;
+  const current = monthOf(today(ctx));
+
+  const [account, withData] = await ctx.db.batch<Record<string, unknown>>([
+    ctx.db.prepare("SELECT created_at FROM users WHERE id = ?").bind(ctx.userId),
+    ctx.db
+      .prepare(
+        `SELECT DISTINCT substr(expense_date, 1, 7) AS month FROM expenses WHERE user_id = ? AND deleted_at IS NULL
+         UNION SELECT month FROM legacy_monthly_totals WHERE user_id = ? ORDER BY month DESC`,
+      )
+      .bind(ctx.userId, ctx.userId),
+  ]);
+  const createdAt = (account!.results[0] as { created_at?: string } | undefined)?.created_at;
+  const joined = createdAt && !Number.isNaN(Date.parse(createdAt)) ? monthOf(localDate(new Date(createdAt), ctx.config.tz)) : current;
+  const dataMonths = (withData!.results as { month: string }[]).map((r) => r.month);
+  let oldest = addMonths(joined < current ? joined : current, -1);
+  const firstData = dataMonths[dataMonths.length - 1];
+  if (firstData && firstData < oldest) oldest = firstData;
+  const limit = addMonths(endMonth, -(maxMonths - 1));
+  if (oldest < limit) oldest = limit;
+  if (oldest > endMonth) oldest = endMonth;
+  const months: string[] = [];
+  for (let m = endMonth; m >= oldest; m = addMonths(m, -1)) months.push(m);
+
   const from = monthRange(oldest).start;
   const to = monthRange(endMonth).end;
-
-  const [cats, exp, legacy, withData] = await ctx.db.batch<Record<string, unknown>>([
-    ctx.db.prepare("SELECT key, display_name FROM categories WHERE is_active = 1 ORDER BY sort_order"),
+  const [exp, legacy] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db
       .prepare(
         `SELECT substr(expense_date, 1, 7) AS month, category, SUM(amount) AS total FROM expenses
-         WHERE deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?
+         WHERE user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?
          GROUP BY month, category`,
       )
-      .bind(BASE_CURRENCY, from, to),
-    ctx.db.prepare("SELECT month, category, amount AS total FROM legacy_monthly_totals WHERE month >= ? AND month <= ?").bind(oldest, endMonth),
-    ctx.db.prepare(
-      `SELECT DISTINCT substr(expense_date, 1, 7) AS month FROM expenses WHERE deleted_at IS NULL
-       UNION SELECT month FROM legacy_monthly_totals ORDER BY month DESC`,
-    ),
+      .bind(ctx.userId, BASE_CURRENCY, from, to),
+    ctx.db
+      .prepare("SELECT month, category, amount AS total FROM legacy_monthly_totals WHERE user_id = ? AND month >= ? AND month <= ?")
+      .bind(ctx.userId, oldest, endMonth),
   ]);
 
-  const categories = cats!.results as { key: string; display_name: string }[];
   const cells = new Map<string, Map<string, number>>();
   const legacyMonths = new Set<string>();
   for (const r of legacy!.results as { month: string; category: string; total: number }[]) legacyMonths.add(r.month);
@@ -144,6 +167,13 @@ export async function monthlyHistory(ctx: ToolContext, endMonth: string, count: 
     m.set(r.category, (m.get(r.category) ?? 0) + r.total);
     cells.set(r.month, m);
   }
+
+  // Columns: the account's categories, plus removed ones (or bare keys) that have spending in the window.
+  const withSpend = new Set([...cells.values()].flatMap((m) => [...m.keys()]));
+  const all = await userCategories(ctx.db, ctx.userId, { includeInactive: true });
+  const cols = all.filter((c) => c.is_active || withSpend.has(c.key));
+  for (const key of withSpend) if (!all.some((c) => c.key === key)) cols.push({ key, name: key, sort_order: 999, is_active: 0 });
+  const categories = cols.map((c) => ({ key: c.key, display_name: c.name }));
 
   const rows = months.map((month) => {
     const m = cells.get(month);
@@ -164,23 +194,24 @@ export async function monthlyHistory(ctx: ToolContext, endMonth: string, count: 
 
   return {
     end_month: endMonth,
+    joined_month: joined,
     categories,
     rows,
     category_totals,
     total: round2(tracked.reduce((s, r) => s + (r.total ?? 0), 0)),
     monthly_average: tracked.length ? round2(tracked.reduce((s, r) => s + (r.total ?? 0), 0) / tracked.length) : null,
-    months_with_data: (withData!.results as { month: string }[]).map((r) => r.month),
+    months_with_data: dataMonths,
   };
 }
 
 export const monthlyHistoryTool = defineTool({
   name: "monthly_history",
   description:
-    "Spending per category for each of the last N months (default 12) ending at end_month. Months with no records have null values. " +
-    "Use it to compare months ('how does this month compare to the last few?').",
+    "Spending per category for each month since the account started (at least the last 2 months), newest first, up to end_month. " +
+    "Months with no records have null values. Use it to compare months ('how does this month compare to the last few?').",
   input: z.object({
     end_month: MonthInput,
-    months: z.number().int().min(1).max(36).default(12),
+    months: z.number().int().min(1).max(36).default(24).describe("Look back at most this many months."),
   }),
   async run(ctx, input) {
     return monthlyHistory(ctx, input.end_month ?? monthOf(today(ctx)), input.months);

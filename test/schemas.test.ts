@@ -4,7 +4,7 @@ import { toolJsonSchemas } from "../src/tools/registry";
 describe("tool JSON schemas sent to the LLM (D16)", () => {
   const schemas = toolJsonSchemas();
 
-  it("covers the Phase 1 and Phase 4 tool list", () => {
+  it("covers the full tool list", () => {
     expect(schemas.map((s) => s.name)).toEqual([
       "add_expense",
       "list_expenses",
@@ -17,6 +17,7 @@ describe("tool JSON schemas sent to the LLM (D16)", () => {
       "monthly_report",
       "top_spending",
       "monthly_history",
+      "list_categories",
     ]);
   });
 
@@ -28,12 +29,12 @@ describe("tool JSON schemas sent to the LLM (D16)", () => {
     }
   });
 
-  it("add_expense exposes the category enum and has no date field, only date_token", () => {
+  it("add_expense takes a category key (each account has its own list) and no date field, only date_token", () => {
     const add = schemas.find((s) => s.name === "add_expense")!.parameters as {
       properties: { items: { items: { properties: Record<string, { enum?: string[] }>; required: string[] } } };
     };
     const item = add.properties.items.items;
-    expect(item.properties.category!.enum).toContain("food_dining");
+    expect(item.properties.category!.enum).toBeUndefined();
     expect(Object.keys(item.properties).sort()).toEqual(["amount", "category", "currency", "date_token", "note"]);
     expect(item.required.sort()).toEqual(["amount", "category", "note"]);
   });

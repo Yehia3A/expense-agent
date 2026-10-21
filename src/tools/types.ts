@@ -2,25 +2,19 @@ import { z } from "zod";
 import type { AppConfig } from "../env";
 import { localDate } from "../lib/dates";
 
-export const CATEGORY_KEYS = [
-  "food_dining",
-  "groceries",
-  "transport_fuel",
-  "bills_utilities",
-  "entertainment",
-  "shopping",
-  "sports",
-  "other",
-] as const;
+/** A category key from the account's own list (D41); see tools/categories.ts. */
+export type CategoryKey = string;
 
-export type CategoryKey = (typeof CATEGORY_KEYS)[number];
-export const CategoryEnum = z.enum(CATEGORY_KEYS);
+/** A category as the model or a client gives it: a key or a name, checked against the account's list at run time. */
+export const CategoryInput = z.string().trim().min(1).max(40);
 
 export type Source = "chat" | "mcp" | "api" | "import";
 
 /** Everything a tool needs. /chat, /api and (later) /mcp each build one per request. */
 export interface ToolContext {
   db: D1Database;
+  /** The signed-in account. Every query reads and writes only this user's rows (D34). */
+  userId: string;
   now: () => Date;
   config: AppConfig;
   requestId: string;
@@ -54,6 +48,7 @@ export function defineTool<S extends z.ZodType>(tool: Tool<S>): Tool<S> {
 
 export interface ExpenseRow {
   id: string;
+  user_id: string;
   amount: number;
   currency: string;
   category: CategoryKey;

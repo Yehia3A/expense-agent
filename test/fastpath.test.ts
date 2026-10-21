@@ -5,12 +5,12 @@ import { runChat } from "../src/chat/loop";
 import { updateExpense } from "../src/tools/expenses";
 import { lookupCategory } from "../src/tools/merchants";
 import type { ExpenseRow } from "../src/tools/types";
-import { NOW, resetDb } from "./helpers";
+import { NOW, resetDb, TEST_USER, makeCtx } from "./helpers";
 
 async function seed(terms: Record<string, string>) {
   await env.DB.batch(
     Object.entries(terms).map(([term, category]) =>
-      env.DB.prepare("INSERT OR REPLACE INTO merchant_map (term, category, hits, updated_at) VALUES (?, ?, 1, 'seed')").bind(term, category),
+      env.DB.prepare("INSERT OR REPLACE INTO merchant_map (user_id, term, category, hits, updated_at) VALUES ('', ?, ?, 1, 'seed')").bind(term, category),
     ),
   );
 }
@@ -72,15 +72,15 @@ describe("parseFast (plan 7.2 path A)", () => {
 
 describe("merchant cache (path C)", () => {
   it("exact term, then agreeing words, never disagreeing ones", async () => {
-    expect(await lookupCategory(env.DB, "Coffee")).toBe("food_dining");
-    expect(await lookupCategory(env.DB, "uber home")).toBe("transport_fuel");
-    expect(await lookupCategory(env.DB, "coffee uber")).toBeNull();
-    expect(await lookupCategory(env.DB, "mystery")).toBeNull();
+    expect(await lookupCategory(env.DB, TEST_USER, "Coffee")).toBe("food_dining");
+    expect(await lookupCategory(env.DB, TEST_USER, "uber home")).toBe("transport_fuel");
+    expect(await lookupCategory(env.DB, TEST_USER, "coffee uber")).toBeNull();
+    expect(await lookupCategory(env.DB, TEST_USER, "mystery")).toBeNull();
   });
 
   it("needs every item categorized, otherwise the LLM handles the message", async () => {
-    expect(await fastPath(env.DB, "coffee 200, vegs 400")).toHaveLength(2);
-    expect(await fastPath(env.DB, "coffee 200, mystery 50")).toBeNull();
+    expect(await fastPath(env.DB, TEST_USER, "coffee 200, vegs 400")).toHaveLength(2);
+    expect(await fastPath(env.DB, TEST_USER, "coffee 200, mystery 50")).toBeNull();
   });
 });
 
@@ -107,7 +107,7 @@ function llm(steps: Step[]) {
   return { fetchImpl, models, calls: () => i };
 }
 const chat = (message: string, id: string, l: ReturnType<typeof llm>, e: typeof env = env) =>
-  runChat(e, { message, request_id: id, history: [] }, { fetchImpl: l.fetchImpl, now: () => NOW });
+  runChat(e, TEST_USER, { message, request_id: id, history: [] }, { fetchImpl: l.fetchImpl, now: () => NOW });
 
 describe("fast path inside /chat", () => {
   it("saves known items without calling the LLM and logs path 'regex'", async () => {
@@ -154,9 +154,9 @@ describe("fast path inside /chat", () => {
       { content: "Saved." },
     ]);
     const r = await chat("pens 50", "fast-0006", l);
-    expect(await lookupCategory(env.DB, "pens")).toBeNull(); // flagged 'other' is a guess
-    await updateExpense({ db: env.DB, now: () => NOW, config: { tz: "Africa/Cairo", largeAmountThreshold: 5000, oldDateConfirmDays: 60 }, requestId: "x", source: "api", lineCounter: { next: 0 } }, (r.saved[0] as ExpenseRow).id, { category: "shopping" });
-    expect(await lookupCategory(env.DB, "pens")).toBe("shopping");
+    expect(await lookupCategory(env.DB, TEST_USER, "pens")).toBeNull(); // flagged 'other' is a guess
+    await updateExpense(makeCtx(), (r.saved[0] as ExpenseRow).id, { category: "shopping" });
+    expect(await lookupCategory(env.DB, TEST_USER, "pens")).toBe("shopping");
   });
 
   it("FAST_PATH=off sends everything to the LLM (eval baseline)", async () => {

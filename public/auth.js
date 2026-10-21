@@ -1,5 +1,6 @@
-// Welcome screen: sign in, or create the first account. Real <form>s with
-// autocomplete hints so the browser offers to save and fill the password.
+// Welcome screen: sign in, or create a free account (anyone, no email).
+// Real <form>s with autocomplete hints so the browser offers to save and
+// fill the password.
 import { $ } from "./lib.js";
 
 export async function getMe() {
@@ -53,6 +54,7 @@ function wire(form, path, payload, validate) {
     busy(form, true);
     try {
       await post(path, payload(data));
+      try { localStorage.setItem(KNOWN_KEY, "1"); } catch { /* fine */ }
       await rememberCredential(form);
       // A full reload: the browser sees the login form go away (its cue to save
       // the password), and the app starts with the new session cookie.
@@ -79,8 +81,8 @@ function wireOnce() {
   );
   wire(
     $("#setup-form"),
-    "/api/auth/setup",
-    (d) => ({ username: d.username, password: d.password, setup_key: d.setup_key || undefined }),
+    "/api/auth/signup",
+    (d) => ({ username: d.username, password: d.password }),
     (d) => {
       if (!/^[A-Za-z0-9._@-]{3,40}$/.test(d.username ?? "")) return "Username: 3–40 letters, numbers or . _ @ -";
       if ((d.password ?? "").length < 10) return "Password: at least 10 characters.";
@@ -88,6 +90,8 @@ function wireOnce() {
       return null;
     },
   );
+  $("#auth-tab-signin").addEventListener("click", () => selectTab("signin"));
+  $("#auth-tab-signup").addEventListener("click", () => selectTab("signup"));
   for (const btn of document.querySelectorAll(".pw-toggle")) {
     btn.addEventListener("click", () => {
       const input = btn.parentElement.querySelector("input");
@@ -100,20 +104,33 @@ function wireOnce() {
   }
 }
 
+// Remembers that this browser has signed in before, to open on "Sign in" next time.
+const KNOWN_KEY = "expenseagent.known";
+let signupOpen = true;
+
+function selectTab(tab, message = "") {
+  const signup = tab === "signup" && signupOpen;
+  $("#auth-tab-signin").setAttribute("aria-selected", String(!signup));
+  $("#auth-tab-signup").setAttribute("aria-selected", String(signup));
+  $("#login-form").hidden = signup;
+  $("#setup-form").hidden = !signup;
+  const form = signup ? $("#setup-form") : $("#login-form");
+  showError(form, message);
+  busy(form, false);
+  (signup ? $("#setup-username") : $("#login-username")).focus();
+}
+
 export function showWelcome(me, { message } = {}) {
   wireOnce();
   $("#app").hidden = true;
   $("#boot").hidden = true;
   $("#welcome").hidden = false;
-  const setup = !!me?.setup_required;
-  $("#login-form").hidden = setup;
-  $("#setup-form").hidden = !setup;
-  $("#setup-key-field").hidden = !me?.setup_key_required;
-  $("#setup-key").required = !!me?.setup_key_required;
-  const form = setup ? $("#setup-form") : $("#login-form");
-  showError(form, message ?? "");
-  busy(form, false);
-  (setup ? $(me?.setup_key_required ? "#setup-key" : "#setup-username") : $("#login-username")).focus();
+  signupOpen = me?.signup_open !== false;
+  $("#auth-tab-signup").hidden = !signupOpen;
+  $("#signup-closed").hidden = signupOpen;
+  let known = false;
+  try { known = localStorage.getItem(KNOWN_KEY) === "1"; } catch { /* first visit */ }
+  selectTab(known || message || !signupOpen ? "signin" : "signup", message ?? "");
 }
 
 export async function signOut() {

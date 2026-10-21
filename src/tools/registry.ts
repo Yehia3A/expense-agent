@@ -2,6 +2,7 @@ import { z } from "zod";
 import { budgetStatusTool, setBudgetTool } from "./budgets";
 import { addExpenseTool, deleteExpenseTool, listExpensesTool, undoRequestTool, updateExpenseTool } from "./expenses";
 import { monthlyHistoryTool, monthlyReportTool, topSpendingTool } from "./history";
+import { listCategoriesTool } from "./categories";
 import { summarizeTool } from "./reports";
 import { ToolError, type Tool, type ToolContext } from "./types";
 
@@ -19,6 +20,7 @@ export const TOOLS: Tool[] = [
   monthlyReportTool,
   topSpendingTool,
   monthlyHistoryTool,
+  listCategoriesTool,
 ] as Tool[];
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));

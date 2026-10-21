@@ -13,7 +13,7 @@ export interface SessionUser {
 }
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-async function sha256(token: string) {
+export async function sha256Hex(token: string) {
   return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
 }
 
@@ -39,14 +39,14 @@ export async function createSession(db: D1Database, userId: string, userAgent: s
   const iso = new Date(now).toISOString();
   await db
     .prepare("INSERT INTO sessions (id, user_id, created_at, renewed_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(await sha256(token), userId, iso, iso, new Date(now + SESSION_DAYS * DAY_MS).toISOString(), userAgent?.slice(0, 200) ?? null)
+    .bind(await sha256Hex(token), userId, iso, iso, new Date(now + SESSION_DAYS * DAY_MS).toISOString(), userAgent?.slice(0, 200) ?? null)
     .run();
   return token;
 }
 
 /** The signed-in user, or null. `renewed` is true when the expiry was just pushed back (send a fresh cookie). */
 export async function getSession(db: D1Database, token: string, now: number): Promise<(SessionUser & { renewed: boolean }) | null> {
-  const id = await sha256(token);
+  const id = await sha256Hex(token);
   const row = await db
     .prepare(
       `SELECT s.user_id, s.renewed_at, s.expires_at, u.username
@@ -71,12 +71,12 @@ export async function getSession(db: D1Database, token: string, now: number): Pr
 }
 
 export async function deleteSession(db: D1Database, token: string) {
-  await db.prepare("DELETE FROM sessions WHERE id = ?").bind(await sha256(token)).run();
+  await db.prepare("DELETE FROM sessions WHERE id = ?").bind(await sha256Hex(token)).run();
 }
 
 /** Sign out everywhere except (optionally) the current session. */
 export async function deleteOtherSessions(db: D1Database, userId: string, keepToken: string | null) {
-  const keep = keepToken ? await sha256(keepToken) : "";
+  const keep = keepToken ? await sha256Hex(keepToken) : "";
   await db.prepare("DELETE FROM sessions WHERE user_id = ? AND id <> ?").bind(userId, keep).run();
 }
 

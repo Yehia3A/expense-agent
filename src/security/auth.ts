@@ -1,70 +1,78 @@
 import type { Env } from "../env";
 import { accessToken, verifyAccessJwt } from "./access";
-import { countUsers, getSession, readSessionToken, sessionCookie } from "./sessions";
+import { countUsers, getSession, readSessionToken, sessionCookie, sha256Hex } from "./sessions";
 
-// Who may call /api and /chat (plan 11, O6: no unauthenticated access).
+// Who is calling (D34: every account sees only its own data).
 //
-//   1. `Authorization: Bearer <APP_TOKEN>`, when APP_TOKEN is set (scripts, MCP clients).
-//   2. A valid Cloudflare Access JWT, when ACCESS_TEAM_DOMAIN and ACCESS_AUD are set.
-//   3. A signed-in browser session (username + password, 30-day cookie; D32).
-//   4. With nothing configured and no account created yet, only localhost is served
-//      (wrangler dev). A deployed Worker in that state refuses every request.
+//   Gate (optional): when ACCESS_TEAM_DOMAIN and ACCESS_AUD are set, every API
+//   request must also carry a valid Cloudflare Access JWT. For a public app
+//   leave them empty.
+//
+//   Identity, first match wins:
+//     1. `Authorization: Bearer <personal API token>` (MCP clients, scripts).
+//     2. The browser's session cookie (username + password sign-in).
+//     3. Local development only: on localhost, before any account exists,
+//        requests act as the built-in "local" user.
 
-export type AuthResult =
-  | { ok: true; via: "access" | "token" | "session" | "local"; email?: string | null; username?: string; setCookie?: string }
-  | { ok: false; status: 401 | 503; error: string };
-
+export const LOCAL_USER = "local";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-/** Constant-time comparison so the token can't be guessed byte by byte from timing. */
-export function sameToken(a: string, b: string): boolean {
-  const enc = new TextEncoder();
-  const x = enc.encode(a);
-  const y = enc.encode(b);
-  let diff = x.length ^ y.length;
-  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
-  return diff === 0;
+export interface Identity {
+  userId: string;
+  username: string;
+  via: "token" | "session" | "local";
+  /** Refreshed session cookie to send back (the 30 days slid forward). */
+  setCookie?: string;
 }
 
-export async function authenticate(req: Request, env: Env, deps: { fetchImpl?: typeof fetch; now?: number } = {}): Promise<AuthResult> {
-  const accessOn = !!(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD);
-  const tokenOn = !!env.APP_TOKEN;
+export const accessEnabled = (env: Env) => !!(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD);
 
-  if (tokenOn) {
-    const m = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "");
-    if (m && sameToken(m[1]!.trim(), env.APP_TOKEN!)) return { ok: true, via: "token" };
+/** The optional Cloudflare Access gate. Always passes when Access isn't configured. */
+export async function accessGate(req: Request, env: Env, deps: { fetchImpl?: typeof fetch; now?: number } = {}): Promise<boolean> {
+  if (!accessEnabled(env)) return true;
+  const jwt = accessToken(req);
+  if (!jwt) return false;
+  try {
+    return (await verifyAccessJwt(jwt, { teamDomain: env.ACCESS_TEAM_DOMAIN!, aud: env.ACCESS_AUD! }, deps)).ok;
+  } catch (e) {
+    console.error("access verification failed", e);
+    return false;
   }
+}
 
-  if (accessOn) {
-    const jwt = accessToken(req);
-    if (jwt) {
-      try {
-        const r = await verifyAccessJwt(jwt, { teamDomain: env.ACCESS_TEAM_DOMAIN!, aud: env.ACCESS_AUD! }, deps);
-        if (r.ok) return { ok: true, via: "access", email: r.email };
-      } catch (e) {
-        console.error("access verification failed", e);
-      }
-    }
-  }
-
-  const now = deps.now ?? Date.now();
+export async function identify(req: Request, env: Env, now: number): Promise<Identity | null> {
   const url = new URL(req.url);
+
+  const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
+  if (bearer) {
+    const row = await env.DB.prepare(
+      `SELECT t.id, t.last_used_at, u.id AS user_id, u.username
+       FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.id = ?`,
+    )
+      .bind(await sha256Hex(bearer))
+      .first<{ id: string; last_used_at: string | null; user_id: string; username: string }>();
+    if (!row) return null; // a wrong token never falls back to anything else
+    if (!row.last_used_at || now - Date.parse(row.last_used_at) > 86_400_000) {
+      await env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE id = ?").bind(new Date(now).toISOString(), row.id).run();
+    }
+    return { userId: row.user_id, username: row.username, via: "token" };
+  }
+
   const session = readSessionToken(req);
   if (session) {
     const s = await getSession(env.DB, session, now);
     if (s) {
       return {
-        ok: true,
-        via: "session",
+        userId: s.user_id,
         username: s.username,
+        via: "session",
         ...(s.renewed ? { setCookie: sessionCookie(session, url.protocol === "https:") } : {}),
       };
     }
   }
 
-  if (!accessOn && !tokenOn && (await countUsers(env.DB)) === 0) {
-    if (LOCAL_HOSTS.has(url.hostname)) return { ok: true, via: "local" };
-    return { ok: false, status: 503, error: "auth not configured: set APP_TOKEN or Cloudflare Access (see docs/SECURITY.md)" };
+  if (LOCAL_HOSTS.has(url.hostname) && !accessEnabled(env) && (await countUsers(env.DB)) === 0) {
+    return { userId: LOCAL_USER, username: LOCAL_USER, via: "local" };
   }
-  return { ok: false, status: 401, error: "unauthorized" };
+  return null;
 }

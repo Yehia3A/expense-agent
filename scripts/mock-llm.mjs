@@ -24,6 +24,12 @@ function reply(message) {
 }
 
 createServer(async (req, res) => {
+  // Fake Whisper: any clip "says" the same thing.
+  if (req.url?.endsWith("/audio/transcriptions")) {
+    for await (const _ of req);
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ text: process.env.MOCK_TRANSCRIPT || "coffee 30" }));
+  }
   let body = "";
   for await (const chunk of req) body += chunk;
   const { messages = [] } = JSON.parse(body || "{}");
@@ -50,6 +56,9 @@ createServer(async (req, res) => {
           note: note.trim() || "item",
           ...(yesterday ? { date_token: "yesterday" } : {}),
         }));
+      // Use only categories this account has (the system prompt lists them as "- key: Name").
+      const keys = new Set([...String(messages[0]?.content ?? "").matchAll(/^- ([a-z0-9_]+): /gm)].map((m) => m[1]));
+      for (const it of items) if (keys.size && !keys.has(it.category)) it.category = "other";
       out = items.length
         ? reply({ tool_calls: [{ id: "c1", type: "function", function: { name: "add_expense", arguments: JSON.stringify({ items }) } }] })
         : reply({ content: "(mock LLM) Tell me what you spent, like 'coffee 200, vegs 400'." });

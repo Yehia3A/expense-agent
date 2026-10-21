@@ -1,5 +1,6 @@
 // In-page dialogs that replace the browser's confirm()/prompt() boxes:
 // centered card, dimmed backdrop, Esc or a click outside cancels, focus stays inside.
+import { renderCategoryEditor } from "./categories.js";
 import { api, el, toast } from "./lib.js";
 
 const dlg = document.getElementById("dialog");
@@ -9,7 +10,8 @@ dlg.addEventListener("click", (e) => {
   if (e.target === dlg) dlg.close("cancel");
 });
 
-function open(content, { onClose } = {}) {
+function open(content, { onClose, wide = false } = {}) {
+  dlg.classList.toggle("wide", wide);
   dlg.replaceChildren(content);
   const done = () => {
     dlg.removeEventListener("close", done);
@@ -105,4 +107,136 @@ export function changePasswordDialog() {
   });
   open(form);
   form.querySelector("[name=current_password]").focus();
+}
+
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : null);
+
+/** Personal API token for MCP clients and scripts: created here, shown once. */
+export function apiTokenDialog(current) {
+  const status = el(
+    "p",
+    { class: "dialog-text" },
+    current
+      ? `You have a token, created ${shortDate(current.created_at)}${current.last_used_at ? `, last used ${shortDate(current.last_used_at)}` : ", not used yet"}.`
+      : "You don't have a token yet.",
+  );
+  const result = el("div", { class: "token-box", hidden: true });
+  const create = el("button", { type: "button" }, current ? "Create a new one" : "Create token");
+  const revoke = el("button", { type: "button", class: "ghost", hidden: !current }, "Revoke");
+  const close = el("button", { type: "button", class: "ghost" }, "Close");
+  close.addEventListener("click", () => dlg.close("cancel"));
+
+  create.addEventListener("click", async () => {
+    create.disabled = true;
+    try {
+      const r = await api("/api/auth/token", { method: "POST", body: {} });
+      const input = el("input", { type: "text", readonly: true, value: r.token, "aria-label": "Your API token", spellcheck: "false" });
+      const copy = el("button", { type: "button", class: "small" }, "Copy");
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(r.token);
+          copy.textContent = "Copied";
+        } catch {
+          input.select();
+        }
+      });
+      result.replaceChildren(el("div", { class: "token-row" }, input, copy), el("small", {}, r.message));
+      result.hidden = false;
+      status.textContent = "Your new token (any older one stopped working):";
+      create.hidden = true;
+      revoke.hidden = false;
+      input.select();
+    } catch (err) {
+      toast(err.message);
+      create.disabled = false;
+    }
+  });
+  revoke.addEventListener("click", async () => {
+    try {
+      await api("/api/auth/token", { method: "DELETE" });
+      dlg.close("ok");
+      toast("API token revoked.", "ok");
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  open(
+    el(
+      "div",
+      { class: "dialog-card" },
+      icon("lock"),
+      el("h2", { class: "dialog-title" }, "API token (MCP)"),
+      el("p", { class: "dialog-text" }, "Lets MCP clients like Claude Desktop or Claude Code, and your own scripts, use your account. Treat it like a password."),
+      status,
+      result,
+      el("div", { class: "dialog-actions" }, close, revoke, create),
+    ),
+  );
+  create.focus();
+}
+
+/** Deletes the account and all its data, after the password. */
+export function deleteAccountDialog() {
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const submit = el("button", { type: "submit", class: "btn-danger" }, "Delete my account");
+  const cancel = el("button", { type: "button", class: "ghost" }, "Cancel");
+  const user = el("input", { type: "text", name: "username", autocomplete: "username", value: document.body.dataset.username ?? "", hidden: true, tabindex: "-1" });
+  const form = el(
+    "form",
+    { class: "dialog-card", novalidate: true },
+    icon("danger"),
+    el("h2", { class: "dialog-title" }, "Delete your account?"),
+    el("p", { class: "dialog-text" }, "This permanently deletes your account and all of your expenses, budgets and history. It can't be undone."),
+    user,
+    field("Your password", { type: "password", name: "password", autocomplete: "current-password", required: true }),
+    error,
+    el("div", { class: "dialog-actions" }, cancel, submit),
+  );
+  cancel.addEventListener("click", () => dlg.close("cancel"));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = new FormData(form).get("password");
+    if (!password) {
+      error.textContent = "Enter your password.";
+      error.hidden = false;
+      return;
+    }
+    submit.disabled = true;
+    try {
+      await api("/api/auth/delete", { method: "POST", body: { password } });
+      try { localStorage.removeItem("expenseagent.known"); } catch { /* fine */ }
+      location.replace(location.pathname);
+      location.reload();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      submit.disabled = false;
+    }
+  });
+  open(form);
+  cancel.focus();
+}
+
+/** "Edit categories" on the Budget card: the same editor as the first-time setup. */
+export function categoriesDialog(payload, onSaved) {
+  const editor = el("div", { class: "cat-editor" });
+  open(
+    el(
+      "div",
+      { class: "dialog-card" },
+      el("h2", { class: "dialog-title" }, "Your categories"),
+      el("p", { class: "dialog-text" }, `Up to ${payload.max} categories plus Other, each with a monthly budget. Removing a category you've used keeps its past spending in your history.`),
+      editor,
+    ),
+    { wide: true },
+  );
+  renderCategoryEditor(editor, payload, {
+    submitLabel: "Save",
+    onCancel: () => dlg.close("cancel"),
+    onSaved: (saved) => {
+      dlg.close("ok");
+      onSaved(saved);
+    },
+  });
 }

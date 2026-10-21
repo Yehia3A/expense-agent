@@ -8,7 +8,7 @@ import seedSql from "../migrations/0005_merchant_seed.sql?raw";
 import { runChat } from "../src/chat/loop";
 import { addExpenses } from "../src/tools/expenses";
 import type { ExpenseRow } from "../src/tools/types";
-import { makeCtx, NOW, resetDb } from "../test/helpers";
+import { makeCtx, NOW, resetDb, TEST_USER } from "../test/helpers";
 import data from "./cases.json";
 
 type EvalEnv = typeof env & { EVAL_MODE?: string; EVAL_DELAY_MS?: string; EVAL_CASES?: string; EVAL_LIMIT?: string };
@@ -22,6 +22,10 @@ if (e.EVAL_LIMIT) cases = cases.slice(0, Number(e.EVAL_LIMIT));
 // are recorded as deferred.
 const noLlm = (async () =>
   Response.json({ choices: [{ message: { content: "(deferred to LLM)" } }] })) as unknown as typeof fetch;
+
+const sharedSeed = seedSql
+  .replace("INSERT OR IGNORE INTO merchant_map (term, category, hits, updated_at)", "INSERT OR IGNORE INTO merchant_map (user_id, term, category, hits, updated_at)")
+  .replace(/^(\s*)\('/gm, "$1('', '");
 
 async function fixtures() {
   // A little history so queries have something to answer.
@@ -39,7 +43,8 @@ async function fixtures() {
 describe(`eval (${mode})`, () => {
   it.each(cases.map((c) => [c.id, c] as const))("%s", async (_id, c) => {
     await resetDb();
-    await env.DB.prepare(seedSql).run();
+    // The shared starting vocabulary (user_id '' since migration 0007).
+    await env.DB.prepare(sharedSeed).run();
     await fixtures();
     const runEnv = { ...env, FAST_PATH: mode === "llm" ? "off" : "on", LLM_FALLBACK_MODEL: "" };
     const requestId = `eval-${c.id}-${Date.now()}`;
@@ -49,6 +54,7 @@ describe(`eval (${mode})`, () => {
     try {
       res = await runChat(
         runEnv,
+        TEST_USER,
         { message: c.input, request_id: requestId, history: (c as { history?: { role: "user" | "assistant"; content: string }[] }).history ?? [] },
         { now: () => NOW, fetchImpl: mode === "fastpath" ? noLlm : undefined },
       );
@@ -57,10 +63,10 @@ describe(`eval (${mode})`, () => {
     }
     const latency = Date.now() - started;
     const saved = (
-      await env.DB.prepare("SELECT * FROM expenses WHERE request_id = ? AND deleted_at IS NULL ORDER BY line_index").bind(requestId).all<ExpenseRow>()
+      await env.DB.prepare("SELECT * FROM expenses WHERE user_id = ? AND request_id = ? AND deleted_at IS NULL ORDER BY line_index").bind(TEST_USER, requestId).all<ExpenseRow>()
     ).results;
-    const log = await env.DB.prepare("SELECT tool_calls FROM logs WHERE request_id = ? ORDER BY ts DESC LIMIT 1")
-      .bind(requestId)
+    const log = await env.DB.prepare("SELECT tool_calls FROM logs WHERE user_id = ? AND request_id = ? ORDER BY ts DESC LIMIT 1")
+      .bind(TEST_USER, requestId)
       .first<{ tool_calls: string }>();
     const obs = {
       id: c.id,

@@ -120,21 +120,31 @@ describe("Cloudflare Access JWT (plan 11)", () => {
 });
 
 describe("auth modes", () => {
-  it("with no auth configured, only localhost is served; a deployed Worker refuses to run open", async () => {
-    expect((await get("http://localhost/api/health", {}, env)).status).toBe(200);
-    expect((await get("http://127.0.0.1/api/health", {}, env)).status).toBe(200);
-    const deployed = await get("https://ea.example.workers.dev/api/health", {}, env);
-    expect(deployed.status).toBe(503);
-    expect(((await deployed.json()) as { error: string }).error).toMatch(/auth not configured/);
+  it("before any account exists only localhost acts as the local user; a deployed Worker needs a sign-in", async () => {
+    expect((await get("http://localhost/api/budget-status", {}, env)).status).toBe(200);
+    expect((await get("http://127.0.0.1/api/budget-status", {}, env)).status).toBe(200);
+    expect((await get("https://ea.example.workers.dev/api/budget-status", {}, env)).status).toBe(401);
+    expect((await get("https://ea.example.workers.dev/api/health", {}, env)).status).toBe(200);
   });
 
-  it("APP_TOKEN works on its own and alongside Access", async () => {
-    const tokenEnv = { ...env, APP_TOKEN: "t0ken" };
-    expect((await get("https://ea.example.workers.dev/api/health", { authorization: "Bearer t0ken" }, tokenEnv)).status).toBe(200);
-    expect((await get("https://ea.example.workers.dev/api/health", { authorization: "Bearer nope" }, tokenEnv)).status).toBe(401);
-    expect((await get("https://ea.example.workers.dev/api/health", {}, tokenEnv)).status).toBe(401);
-    const both = { ...accessEnv, APP_TOKEN: "t0ken" };
-    expect((await get("https://ea.example.workers.dev/api/health", { authorization: "Bearer t0ken" }, both)).status).toBe(200);
+  it("Access, when configured, is an extra gate in front of the sign-in", async () => {
+    const key = await keypair("k1");
+    const certs = certsFetch(() => [key.jwk]);
+    const jwt = await sign(key, goodClaims());
+    const signup = await handle(
+      new Request("https://ea.example.workers.dev/api/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "cf-access-jwt-assertion": jwt },
+        body: JSON.stringify({ username: "gated", password: "long enough password" }),
+      }),
+      accessEnv,
+      certs,
+    );
+    expect(signup.status).toBe(200);
+    const cookie = (signup.headers.get("set-cookie") ?? "").split(";")[0]!;
+    expect((await get("https://ea.example.workers.dev/api/budget-status", { cookie, "cf-access-jwt-assertion": jwt }, accessEnv, certs)).status).toBe(200);
+    expect((await get("https://ea.example.workers.dev/api/budget-status", { cookie }, accessEnv, certs)).status).toBe(401);
+    expect((await get("https://ea.example.workers.dev/api/budget-status", { "cf-access-jwt-assertion": jwt }, accessEnv, certs)).status).toBe(401);
   });
 
   it("static assets are served without hitting auth (Access protects them at the edge)", async () => {

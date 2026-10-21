@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { addDays, addMonths, isValidYmd, monthOf, monthStart } from "../lib/dates";
 import { BASE_CURRENCY } from "./budgets";
-import { CategoryEnum, defineTool, today, ToolError } from "./types";
+import { resolveCategory } from "./categories";
+import { CategoryInput, defineTool, today, ToolError } from "./types";
 
 const DateInput = z.string().refine(isValidYmd, "date must be YYYY-MM-DD");
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -27,12 +28,13 @@ export const summarizeTool = defineTool({
     start_date: DateInput.describe("YYYY-MM-DD, inclusive"),
     end_date: DateInput.describe("YYYY-MM-DD, inclusive"),
     group_by: z.enum(["category", "day", "month", "note"]).default("category"),
-    category: CategoryEnum.optional().describe("Only this category."),
+    category: CategoryInput.optional().describe("Only this category (key from your list)."),
   }),
   async run(ctx, input) {
     if (input.end_date < input.start_date) throw new ToolError("end_date is before start_date");
     if (input.start_date > today(ctx)) throw new ToolError("start_date is in the future");
     const endExclusive = addDays(input.end_date, 1);
+    const category = input.category ? await resolveCategory(ctx, input.category) : undefined;
     const keyExpr = {
       category: "category",
       day: "expense_date",
@@ -41,11 +43,11 @@ export const summarizeTool = defineTool({
     }[input.group_by];
 
     let sql = `SELECT ${keyExpr} AS key, SUM(amount) AS total, COUNT(*) AS count FROM expenses
-               WHERE deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?`;
-    const args: unknown[] = [BASE_CURRENCY, input.start_date, endExclusive];
-    if (input.category) {
+               WHERE user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?`;
+    const args: unknown[] = [ctx.userId, BASE_CURRENCY, input.start_date, endExclusive];
+    if (category) {
       sql += " AND category = ?";
-      args.push(input.category);
+      args.push(category);
     }
     sql += " GROUP BY key";
     const rows = (await ctx.db.prepare(sql).bind(...args).all<{ key: string; total: number; count: number }>()).results;
@@ -58,11 +60,11 @@ export const summarizeTool = defineTool({
     let legacyIncluded = 0;
     if (legacyMonths.length) {
       const ph = legacyMonths.map(() => "?").join(",");
-      let lsql = `SELECT month, category, amount FROM legacy_monthly_totals WHERE month IN (${ph})`;
-      const largs: unknown[] = [...legacyMonths];
-      if (input.category) {
+      let lsql = `SELECT month, category, amount FROM legacy_monthly_totals WHERE user_id = ? AND month IN (${ph})`;
+      const largs: unknown[] = [ctx.userId, ...legacyMonths];
+      if (category) {
         lsql += " AND category = ?";
-        largs.push(input.category);
+        largs.push(category);
       }
       const legacy = (await ctx.db.prepare(lsql).bind(...largs).all<{ month: string; category: string; amount: number }>()).results;
       for (const l of legacy) {

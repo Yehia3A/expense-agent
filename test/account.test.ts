@@ -7,25 +7,36 @@ import { resetDb } from "./helpers";
 beforeEach(resetDb);
 
 const HOST = "https://expense-agent.example.workers.dev";
-const prod = { ...env, APP_TOKEN: "setup-key-123" };
 const DAY = 86_400_000;
 const T0 = Date.parse("2026-10-20T10:00:00Z");
 
-function req(path: string, opts: { method?: string; body?: unknown; cookie?: string; ip?: string; origin?: string; host?: string } = {}) {
-  const headers: Record<string, string> = { "content-type": "application/json", "cf-connecting-ip": opts.ip ?? "203.0.113.7" };
-  if (opts.cookie) headers.cookie = opts.cookie;
-  if (opts.origin) headers.origin = opts.origin;
-  return new Request(`${opts.host ?? HOST}${path}`, {
-    method: opts.method ?? (opts.body === undefined ? "GET" : "POST"),
+interface ReqOpts {
+  method?: string;
+  body?: unknown;
+  cookie?: string;
+  bearer?: string;
+  ip?: string;
+  origin?: string;
+  host?: string;
+}
+function req(path: string, o: ReqOpts = {}) {
+  const headers: Record<string, string> = { "content-type": "application/json", "cf-connecting-ip": o.ip ?? "203.0.113.7" };
+  if (o.cookie) headers.cookie = o.cookie;
+  if (o.bearer) headers.authorization = `Bearer ${o.bearer}`;
+  if (o.origin) headers.origin = o.origin;
+  return new Request(`${o.host ?? HOST}${path}`, {
+    method: o.method ?? (o.body === undefined ? "GET" : "POST"),
     headers,
-    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    body: o.body === undefined ? undefined : JSON.stringify(o.body),
   });
 }
-const at = (t: number) => ({ now: () => new Date(t) });
+const call = (path: string, o: ReqOpts = {}, t = T0, e: typeof env = env) => handle(req(path, o), e, { now: () => new Date(t) });
 const cookieOf = (res: Response) => (res.headers.get("set-cookie") ?? "").split(";")[0]!;
 
-async function setup(username = "lyn", password = "correct horse battery") {
-  const res = await handle(req("/api/auth/setup", { body: { username, password, setup_key: "setup-key-123" } }), prod, at(T0));
+let ipSeq = 0;
+async function signup(username = "lyn", password = "correct horse battery") {
+  // A fresh IP each time so the per-IP sign-up limit doesn't interfere.
+  const res = await call("/api/auth/signup", { body: { username, password }, ip: `198.18.0.${++ipSeq % 250}` });
   expect(res.status).toBe(200);
   return cookieOf(res);
 }
@@ -42,134 +53,200 @@ describe("passwords", () => {
   });
 });
 
-describe("first account", () => {
-  it("me reports that setup is needed and whether a setup key is", async () => {
-    const me = await (await handle(req("/api/auth/me"), prod, at(T0))).json();
-    expect(me).toEqual({ authenticated: false, setup_required: true, setup_key_required: true });
-    const local = await (await handle(req("/api/auth/me", { host: "http://localhost:8787" }), env, at(T0))).json();
-    expect(local).toMatchObject({ setup_required: true, setup_key_required: false });
-  });
-
-  it("needs the APP_TOKEN as setup key, sets a 30-day HttpOnly Strict Secure cookie, and only works once", async () => {
-    const wrong = await handle(req("/api/auth/setup", { body: { username: "lyn", password: "correct horse battery", setup_key: "nope" } }), prod, at(T0));
-    expect(wrong.status).toBe(403);
-    const ok = await handle(req("/api/auth/setup", { body: { username: "lyn", password: "correct horse battery", setup_key: "setup-key-123" } }), prod, at(T0));
-    expect(ok.status).toBe(200);
-    const cookie = ok.headers.get("set-cookie")!;
+describe("open sign-up (D34)", () => {
+  it("me says sign-up is open; anyone can create an account with just a username and password", async () => {
+    expect(await (await call("/api/auth/me")).json()).toEqual({ authenticated: false, signup_open: true });
+    const res = await call("/api/auth/signup", { body: { username: "lyn", password: "correct horse battery" } });
+    expect(res.status).toBe(200);
+    const cookie = res.headers.get("set-cookie")!;
     expect(cookie).toMatch(/^ea_session=[A-Za-z0-9_-]{40,};/);
     for (const flag of ["HttpOnly", "SameSite=Strict", "Secure", "Max-Age=2592000", "Path=/"]) expect(cookie).toContain(flag);
-    const again = await handle(req("/api/auth/setup", { body: { username: "eve", password: "another long password", setup_key: "setup-key-123" } }), prod, at(T0));
-    expect(again.status).toBe(409);
+    expect(await (await call("/api/auth/me", { cookie: cookieOf(res) })).json()).toMatchObject({ authenticated: true, username: "lyn" });
+  });
+
+  it("several people can sign up; usernames are unique regardless of case", async () => {
+    await signup("lyn");
+    await signup("sara");
+    const dup = await call("/api/auth/signup", { body: { username: "LYN", password: "another long password" } });
+    expect(dup.status).toBe(409);
+    expect(((await dup.json()) as { error: string }).error).toMatch(/taken/);
   });
 
   it("rejects short passwords and odd usernames", async () => {
-    const short = await handle(req("/api/auth/setup", { body: { username: "lyn", password: "short", setup_key: "setup-key-123" } }), prod, at(T0));
-    expect(short.status).toBe(400);
-    const odd = await handle(req("/api/auth/setup", { body: { username: "a b", password: "long enough pass", setup_key: "setup-key-123" } }), prod, at(T0));
-    expect(odd.status).toBe(400);
+    expect((await call("/api/auth/signup", { body: { username: "lyn", password: "short" } })).status).toBe(400);
+    expect((await call("/api/auth/signup", { body: { username: "a b", password: "long enough pass" } })).status).toBe(400);
+    expect((await call("/api/auth/signup", { body: { username: "ab", password: "long enough pass" } })).status).toBe(400);
   });
 
-  it("the stored password is a hash, never the password", async () => {
-    await setup();
+  it("can be closed with SIGNUP_OPEN=off; existing accounts still sign in", async () => {
+    await signup("lyn");
+    const closed = { ...env, SIGNUP_OPEN: "off" };
+    expect(await (await call("/api/auth/me", {}, T0, closed)).json()).toEqual({ authenticated: false, signup_open: false });
+    expect((await call("/api/auth/signup", { body: { username: "new1", password: "long enough pass" } }, T0, closed)).status).toBe(403);
+    expect((await call("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" } }, T0, closed)).status).toBe(200);
+  });
+
+  it("limits new accounts per network per day", async () => {
+    const codes = [];
+    for (let i = 0; i < 6; i++) {
+      codes.push((await call("/api/auth/signup", { body: { username: `bot${i}x`, password: "long enough pass" }, ip: "192.0.2.50" })).status);
+    }
+    expect(codes).toEqual([200, 200, 200, 200, 200, 429]);
+    expect((await call("/api/auth/signup", { body: { username: "human1", password: "long enough pass" }, ip: "192.0.2.51" })).status).toBe(200);
+  });
+
+  it("stores only a password hash and the session token's SHA-256", async () => {
+    await signup();
     const row = await env.DB.prepare("SELECT password_hash FROM users").first<{ password_hash: string }>();
     expect(row!.password_hash).not.toContain("correct horse");
     const s = await env.DB.prepare("SELECT id FROM sessions").first<{ id: string }>();
-    expect(s!.id).toMatch(/^[0-9a-f]{64}$/); // only the token's SHA-256
+    expect(s!.id).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
 describe("sign in, sessions, sign out", () => {
   it("wrong password and unknown user get the same answer; the right one gets a session", async () => {
-    await setup();
-    const bad = await handle(req("/api/auth/login", { body: { username: "lyn", password: "nope nope nope" } }), prod, at(T0));
-    const unknown = await handle(req("/api/auth/login", { body: { username: "mallory", password: "nope nope nope" } }), prod, at(T0));
+    await signup();
+    const bad = await call("/api/auth/login", { body: { username: "lyn", password: "nope nope nope" } });
+    const unknown = await call("/api/auth/login", { body: { username: "mallory", password: "nope nope nope" } });
     expect(bad.status).toBe(401);
     expect(await bad.json()).toEqual(await unknown.json());
-    const good = await handle(req("/api/auth/login", { body: { username: "LYN", password: "correct horse battery" } }), prod, at(T0));
+    const good = await call("/api/auth/login", { body: { username: "LYN", password: "correct horse battery" } });
     expect(good.status).toBe(200);
-    const cookie = cookieOf(good);
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0))).status).toBe(200);
-    expect(await (await handle(req("/api/auth/me", { cookie }), prod, at(T0))).json()).toEqual({ authenticated: true, username: "lyn" });
+    expect((await call("/api/budget-status", { cookie: cookieOf(good) })).status).toBe(200);
+  });
+
+  it("data routes need a sign-in; health does not", async () => {
+    await signup();
+    expect((await call("/api/budget-status")).status).toBe(401);
+    expect((await call("/chat", { body: { message: "hi", request_id: "anon-chat-1" } })).status).toBe(401);
+    expect((await call("/mcp", { body: { jsonrpc: "2.0", id: 1, method: "ping" } })).status).toBe(401);
+    expect((await call("/api/health")).status).toBe(200);
   });
 
   it("stays signed in for 30 days, sliding with use", async () => {
-    const cookie = await setup();
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0 + 29 * DAY))).status).toBe(200);
-    // That use renewed it: another 30 days from day 29.
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0 + 58 * DAY))).status).toBe(200);
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0 + 89 * DAY))).status).toBe(401);
+    const cookie = await signup();
+    expect((await call("/api/budget-status", { cookie }, T0 + 29 * DAY)).status).toBe(200);
+    expect((await call("/api/budget-status", { cookie }, T0 + 58 * DAY)).status).toBe(200);
+    expect((await call("/api/budget-status", { cookie }, T0 + 89 * DAY)).status).toBe(401);
   });
 
   it("a renewal sends a fresh cookie; same-day use does not", async () => {
-    const cookie = await setup();
-    const same = await handle(req("/api/health", { cookie }), prod, at(T0 + 3_600_000));
-    expect(same.headers.get("set-cookie")).toBeNull();
-    const later = await handle(req("/api/health", { cookie }), prod, at(T0 + 2 * DAY));
-    expect(later.headers.get("set-cookie")).toContain("Max-Age=2592000");
+    const cookie = await signup();
+    expect((await call("/api/budget-status", { cookie }, T0 + 3_600_000)).headers.get("set-cookie")).toBeNull();
+    expect((await call("/api/budget-status", { cookie }, T0 + 2 * DAY)).headers.get("set-cookie")).toContain("Max-Age=2592000");
   });
 
   it("an unused session ends after 30 days", async () => {
-    const cookie = await setup();
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0 + 31 * DAY))).status).toBe(401);
+    const cookie = await signup();
+    expect((await call("/api/budget-status", { cookie }, T0 + 31 * DAY)).status).toBe(401);
   });
 
   it("sign out ends the session and clears the cookie", async () => {
-    const cookie = await setup();
-    const out = await handle(req("/api/auth/logout", { body: {}, cookie }), prod, at(T0));
+    const cookie = await signup();
+    const out = await call("/api/auth/logout", { body: {}, cookie });
     expect(out.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect((await handle(req("/api/health", { cookie }), prod, at(T0))).status).toBe(401);
+    expect((await call("/api/budget-status", { cookie })).status).toBe(401);
   });
 
   it("forged cookies are refused", async () => {
-    await setup();
-    expect((await handle(req("/api/health", { cookie: "ea_session=" + "A".repeat(43) }), prod, at(T0))).status).toBe(401);
+    await signup();
+    expect((await call("/api/budget-status", { cookie: "ea_session=" + "A".repeat(43) })).status).toBe(401);
   });
 
   it("once an account exists, localhost needs a sign-in too", async () => {
-    await setup();
-    expect((await handle(req("/api/health", { host: "http://localhost:8787" }), env, at(T0))).status).toBe(401);
-  });
-
-  it("APP_TOKEN still works for scripts and MCP clients", async () => {
-    await setup();
-    const r = await handle(new Request(`${HOST}/api/health`, { headers: { authorization: "Bearer setup-key-123" } }), prod, at(T0));
-    expect(r.status).toBe(200);
+    await signup();
+    expect((await call("/api/budget-status", { host: "http://localhost:8787" })).status).toBe(401);
   });
 });
 
-describe("change password", () => {
-  it("needs the current password, then signs out other devices", async () => {
-    const mine = await setup();
-    const other = cookieOf(await handle(req("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" } }), prod, at(T0)));
-    const wrong = await handle(req("/api/auth/password", { body: { current_password: "nope", new_password: "brand new password" }, cookie: mine }), prod, at(T0));
-    expect(wrong.status).toBe(403);
-    const ok = await handle(req("/api/auth/password", { body: { current_password: "correct horse battery", new_password: "brand new password" }, cookie: mine }), prod, at(T0));
-    expect(ok.status).toBe(200);
-    expect((await handle(req("/api/health", { cookie: mine }), prod, at(T0))).status).toBe(200);
-    expect((await handle(req("/api/health", { cookie: other }), prod, at(T0))).status).toBe(401);
-    const oldPw = await handle(req("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" } }), prod, at(T0));
-    expect(oldPw.status).toBe(401);
-    const newPw = await handle(req("/api/auth/login", { body: { username: "lyn", password: "brand new password" } }), prod, at(T0));
-    expect(newPw.status).toBe(200);
+describe("change password and delete account", () => {
+  it("changing the password needs the current one and signs out other devices", async () => {
+    const mine = await signup();
+    const other = cookieOf(await call("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" } }));
+    expect((await call("/api/auth/password", { body: { current_password: "nope", new_password: "brand new password" }, cookie: mine })).status).toBe(403);
+    expect((await call("/api/auth/password", { body: { current_password: "correct horse battery", new_password: "brand new password" }, cookie: mine })).status).toBe(200);
+    expect((await call("/api/budget-status", { cookie: mine })).status).toBe(200);
+    expect((await call("/api/budget-status", { cookie: other })).status).toBe(401);
+    expect((await call("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" } })).status).toBe(401);
+    expect((await call("/api/auth/login", { body: { username: "lyn", password: "brand new password" } })).status).toBe(200);
+  });
+
+  it("deleting an account needs the password and removes all of its data, and only its data", async () => {
+    const lyn = await signup("lyn");
+    const sara = await signup("sara");
+    for (const cookie of [lyn, sara]) {
+      await call("/api/categories", { method: "PUT", body: { categories: [{ name: "Food & Dining" }, { name: "Groceries" }] }, cookie });
+    }
+    await call("/api/expenses", { body: { request_id: "lyn-add-0001", items: [{ amount: 50, category: "food_dining", note: "tea" }] }, cookie: lyn });
+    await call("/api/expenses", { body: { request_id: "sara-add-001", items: [{ amount: 70, category: "food_dining", note: "juice" }] }, cookie: sara });
+    await call("/api/budgets", { method: "PUT", body: { category: "groceries", amount: 3000 }, cookie: lyn });
+
+    expect((await call("/api/auth/delete", { body: { password: "wrong one here" }, cookie: lyn })).status).toBe(403);
+    const del = await call("/api/auth/delete", { body: { password: "correct horse battery" }, cookie: lyn });
+    expect(del.status).toBe(200);
+    expect(del.headers.get("set-cookie")).toContain("Max-Age=0");
+
+    const left = async (table: string) =>
+      (await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = (SELECT id FROM users WHERE username = 'lyn')`).first<{ n: number }>())!.n;
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'lyn'").first<{ n: number }>()).toEqual({ n: 0 });
+    expect(await left("expenses")).toBe(0);
+    expect((await call("/api/budget-status", { cookie: lyn })).status).toBe(401);
+    const saraRows = (await (await call("/api/expenses/recent", { cookie: sara })).json()) as { note: string }[];
+    expect(saraRows.map((r) => r.note)).toEqual(["juice"]);
+    // The name is free again.
+    expect((await call("/api/auth/signup", { body: { username: "lyn", password: "correct horse battery" }, ip: "198.51.100.77" })).status).toBe(200);
+  });
+});
+
+describe("personal API tokens (MCP clients, scripts)", () => {
+  it("a token acts as its own account; a new one replaces the old; revoking ends it", async () => {
+    const cookie = await signup();
+    const t1 = ((await (await call("/api/auth/token", { body: {}, cookie })).json()) as { token: string }).token;
+    expect(t1).toMatch(/^ea_[A-Za-z0-9_-]{40,}$/);
+    expect((await call("/api/budget-status", { bearer: t1 })).status).toBe(200);
+    expect(((await (await call("/api/auth/me", { cookie })).json()) as { api_token: unknown }).api_token).not.toBeNull();
+
+    const t2 = ((await (await call("/api/auth/token", { body: {}, cookie })).json()) as { token: string }).token;
+    expect((await call("/api/budget-status", { bearer: t1 })).status).toBe(401);
+    expect((await call("/api/budget-status", { bearer: t2 })).status).toBe(200);
+
+    await call("/api/auth/token", { method: "DELETE", cookie });
+    expect((await call("/api/budget-status", { bearer: t2 })).status).toBe(401);
+  });
+
+  it("only the token's hash is stored, and a wrong token is just refused", async () => {
+    const cookie = await signup();
+    const t = ((await (await call("/api/auth/token", { body: {}, cookie })).json()) as { token: string }).token;
+    const row = await env.DB.prepare("SELECT id FROM api_tokens").first<{ id: string }>();
+    expect(row!.id).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.id).not.toContain(t);
+    expect((await call("/api/budget-status", { bearer: "ea_" + "x".repeat(43) })).status).toBe(401);
+  });
+
+  it("creating a token needs a signed-in browser, not another token", async () => {
+    const cookie = await signup();
+    const t = ((await (await call("/api/auth/token", { body: {}, cookie })).json()) as { token: string }).token;
+    expect((await call("/api/auth/token", { body: {}, bearer: t })).status).toBe(401);
   });
 });
 
 describe("abuse", () => {
   it("rate-limits sign-in attempts per IP", async () => {
-    await setup();
+    await signup();
     const codes = [];
     for (let i = 0; i < 11; i++) {
-      codes.push((await handle(req("/api/auth/login", { body: { username: "lyn", password: `guess ${i} guess` }, ip: "198.51.100.9" }), prod, at(T0))).status);
+      codes.push((await call("/api/auth/login", { body: { username: "lyn", password: `guess ${i} guess` }, ip: "198.51.100.9" })).status);
     }
     expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
     expect(codes[10]).toBe(429);
-    // Another IP is not blocked by that.
-    expect((await handle(req("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" }, ip: "198.51.100.10" }), prod, at(T0))).status).toBe(200);
+    expect((await call("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" }, ip: "198.51.100.10" })).status).toBe(200);
   });
 
-  it("refuses cross-site sign-in posts", async () => {
-    await setup();
-    const r = await handle(req("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" }, origin: "https://evil.example" }), prod, at(T0));
-    expect(r.status).toBe(403);
+  it("refuses cross-site sign-in and sign-up posts", async () => {
+    await signup();
+    const evil = "https://evil.example";
+    expect((await call("/api/auth/login", { body: { username: "lyn", password: "correct horse battery" }, origin: evil })).status).toBe(403);
+    expect((await call("/api/auth/signup", { body: { username: "victim2", password: "long enough pass" }, origin: evil })).status).toBe(403);
   });
 });

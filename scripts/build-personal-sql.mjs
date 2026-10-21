@@ -1,8 +1,16 @@
-// Builds .wrangler/personal_seed.sql from data/personal.json (gitignored):
+// Builds .wrangler/personal_seed.sql from data/personal.json (gitignored) for
+// one account (--user <username>):
 //   - legacy monthly totals, after checking each month adds up to its expected total;
-//   - starting budgets, only where no budget is set yet (edits made in the app win).
-// Used by `npm run db:seed-personal:local` / `:remote` and scripts/setup-cloudflare.mjs.
+//   - starting budgets, only where that account has no budget yet (edits made in the app win).
+// Run through scripts/claim.mjs (npm run claim:remote -- <username>).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+const userArg = process.argv.indexOf("--user");
+const username = userArg > 0 ? process.argv[userArg + 1] : null;
+if (!username || !/^[A-Za-z0-9._@-]{3,40}$/.test(username)) {
+  console.error("Usage: node scripts/build-personal-sql.mjs --user <username>");
+  process.exit(1);
+}
 
 const CATEGORIES = ["food_dining", "groceries", "transport_fuel", "bills_utilities", "entertainment", "shopping", "sports", "other"];
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -32,8 +40,8 @@ for (const [month, expected] of Object.entries(legacy.expected_totals ?? {})) {
 }
 for (const r of rows) {
   sql.push(
-    `INSERT INTO legacy_monthly_totals (month, category, amount) VALUES ('${r.month}', '${r.category}', ${r.amount}) ` +
-      `ON CONFLICT (month, category) DO UPDATE SET amount = excluded.amount;`,
+    `INSERT INTO legacy_monthly_totals (user_id, month, category, amount) SELECT id, '${r.month}', '${r.category}', ${r.amount} FROM users WHERE username = '${username}' ` +
+      `ON CONFLICT (user_id, month, category) DO UPDATE SET amount = excluded.amount;`,
   );
 }
 
@@ -46,8 +54,8 @@ if (b) {
     if (amount !== null && (typeof amount !== "number" || amount < 0)) throw new Error(`budgets/${category}: bad amount`);
     if (amount === null) continue;
     sql.push(
-      `INSERT INTO budgets (category, month, amount) VALUES ('${category}', '${b.month}', ${amount}) ` +
-        `ON CONFLICT (category, month) DO UPDATE SET amount = excluded.amount WHERE budgets.amount IS NULL;`,
+      `INSERT INTO budgets (user_id, category, month, amount) SELECT id, '${category}', '${b.month}', ${amount} FROM users WHERE username = '${username}' ` +
+        `ON CONFLICT (user_id, category, month) DO UPDATE SET amount = excluded.amount WHERE budgets.amount IS NULL;`,
     );
   }
   console.log(`budgets ${b.month}: ${Object.values(b.amounts ?? {}).filter((v) => v !== null).length} categories (only where unset)`);

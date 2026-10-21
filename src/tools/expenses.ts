@@ -3,7 +3,8 @@ import { addDays, checkExpenseDate, isValidYmd, monthOf, resolveDateToken } from
 import { ulid } from "../lib/ulid";
 import { BASE_CURRENCY, budgetStatus, type BudgetRow, statusLine } from "./budgets";
 import { learnStatements } from "./merchants";
-import { CategoryEnum, type CategoryKey, defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
+import { resolveCategory } from "./categories";
+import { CategoryInput, type CategoryKey, defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
 
 const DATE_TOKEN_HELP =
   "Relative date token, resolved by code. Omit when the user gave no date (means today). " +
@@ -20,7 +21,7 @@ const Note = z.string().trim().min(1).max(200);
 export const ItemInput = z.object({
   amount: Amount.describe("Amount as a positive number. Never guess: ask if the user did not give one."),
   currency: Currency.optional().describe("ISO code. Omit for EGP."),
-  category: CategoryEnum,
+  category: CategoryInput.describe("A category key from the list in the system prompt."),
   note: Note.describe("Short description in the user's words, e.g. 'coffee', 'vegs'."),
   date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
 });
@@ -45,14 +46,14 @@ export function needsReview(category: CategoryKey, note: string): 0 | 1 {
   return category === "other" && !INVESTMENT_NOTE.test(note) ? 1 : 0;
 }
 
-async function getRow(db: D1Database, id: string): Promise<ExpenseRow | null> {
-  return db.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first<ExpenseRow>();
+async function getRow(ctx: ToolContext, id: string): Promise<ExpenseRow | null> {
+  return ctx.db.prepare("SELECT * FROM expenses WHERE id = ? AND user_id = ?").bind(id, ctx.userId).first<ExpenseRow>();
 }
 
 /** Budget status for each (category, month) touched, plus one human status line per saved row. */
 async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "expense_date" | "note" | "amount" | "currency">[]) {
   const months = [...new Set(rows.map((r) => monthOf(r.expense_date)))];
-  const byMonth = new Map(await Promise.all(months.map(async (m) => [m, await budgetStatus(ctx.db, m)] as const)));
+  const byMonth = new Map(await Promise.all(months.map(async (m) => [m, await budgetStatus(ctx.db, ctx.userId, m)] as const)));
   const affected: (BudgetRow & { month: string })[] = [];
   const seen = new Set<string>();
   const lines = rows.map((r) => {
@@ -84,8 +85,21 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
   const errors: string[] = [];
   const resolved: (ResolvedItem & { reasons: string[] })[] = [];
 
+  const keys: (string | null)[] = [];
+  for (const item of items) {
+    try {
+      keys.push(await resolveCategory(ctx, item.category));
+    } catch (e) {
+      if (!(e instanceof ToolError)) throw e;
+      keys.push(null);
+      errors.push(`item ${keys.length} (${item.note}): ${e.message}`);
+    }
+  }
+
   items.forEach((item, i) => {
     const label = `item ${i + 1} (${item.note})`;
+    const category = keys[i];
+    if (!category) return;
     const d = resolveDateToken(item.date_token, t);
     if (!d.ok) return void errors.push(`${label}: ${d.error}`);
     const check = checkExpenseDate(d.date, t, ctx.config.oldDateConfirmDays);
@@ -96,7 +110,7 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
       reasons.push(`amount ${item.amount} is above ${ctx.config.largeAmountThreshold} ${BASE_CURRENCY}`);
     }
     if (check.old) reasons.push(`date ${d.date} is more than ${ctx.config.oldDateConfirmDays} days ago`);
-    resolved.push({ amount: item.amount, currency, category: item.category, note: item.note, expense_date: d.date, reasons });
+    resolved.push({ amount: item.amount, currency, category, note: item.note, expense_date: d.date, reasons });
   });
 
   if (errors.length) return { status: "error", errors };
@@ -116,13 +130,14 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
   const stmts = resolved.map((r, i) =>
     ctx.db
       .prepare(
-        `INSERT INTO expenses (id, amount, currency, category, expense_date, note, needs_review,
+        `INSERT INTO expenses (id, user_id, amount, currency, category, expense_date, note, needs_review,
                                source, request_id, line_index, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (request_id, line_index) DO NOTHING`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user_id, request_id, line_index) DO NOTHING`,
       )
       .bind(
         ulid(ctx.now().getTime()),
+        ctx.userId,
         r.amount,
         r.currency,
         r.category,
@@ -139,11 +154,11 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
 
   const saved = (
     await ctx.db
-      .prepare("SELECT * FROM expenses WHERE request_id = ? AND line_index >= ? AND line_index < ? ORDER BY line_index")
-      .bind(ctx.requestId, first, first + resolved.length)
+      .prepare("SELECT * FROM expenses WHERE user_id = ? AND request_id = ? AND line_index >= ? AND line_index < ? ORDER BY line_index")
+      .bind(ctx.userId, ctx.requestId, first, first + resolved.length)
       .all<ExpenseRow>()
   ).results;
-  const learn = learnStatements(ctx.db, saved, created);
+  const learn = learnStatements(ctx.db, ctx.userId, saved, created);
   if (learn.length) await ctx.db.batch(learn);
   return { status: "saved", request_id: ctx.requestId, saved, ...(await feedback(ctx, saved)) };
 }
@@ -169,18 +184,18 @@ export const listExpensesTool = defineTool({
   input: z.object({
     start_date: DateInput.optional().describe("YYYY-MM-DD, inclusive. Default: 30 days ago."),
     end_date: DateInput.optional().describe("YYYY-MM-DD, inclusive. Default: today."),
-    category: CategoryEnum.optional(),
+    category: CategoryInput.optional(),
     limit: z.number().int().min(1).max(500).default(100),
   }),
   async run(ctx, input) {
     const t = today(ctx);
     const start = input.start_date ?? addDays(t, -30);
     const endExclusive = addDays(input.end_date ?? t, 1);
-    let sql = "SELECT * FROM expenses WHERE deleted_at IS NULL AND expense_date >= ? AND expense_date < ?";
-    const args: unknown[] = [start, endExclusive];
+    let sql = "SELECT * FROM expenses WHERE user_id = ? AND deleted_at IS NULL AND expense_date >= ? AND expense_date < ?";
+    const args: unknown[] = [ctx.userId, start, endExclusive];
     if (input.category) {
       sql += " AND category = ?";
-      args.push(input.category);
+      args.push(await resolveCategory(ctx, input.category));
     }
     sql += " ORDER BY expense_date DESC, id DESC LIMIT ?";
     args.push(input.limit);
@@ -192,8 +207,8 @@ export const listExpensesTool = defineTool({
 export const recentExpenses = async (ctx: ToolContext, limit: number) =>
   (
     await ctx.db
-      .prepare("SELECT * FROM expenses WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?")
-      .bind(limit)
+      .prepare("SELECT * FROM expenses WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?")
+      .bind(ctx.userId, limit)
       .all<ExpenseRow>()
   ).results;
 
@@ -201,20 +216,20 @@ export const UpdateFields = z
   .object({
     amount: Amount.optional(),
     currency: Currency.optional(),
-    category: CategoryEnum.optional(),
+    category: CategoryInput.optional(),
     note: Note.optional(),
     date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
   })
   .refine((f) => Object.values(f).some((v) => v !== undefined), "no fields to update");
 
 export async function updateExpense(ctx: ToolContext, id: string, fields: z.infer<typeof UpdateFields>) {
-  const row = await getRow(ctx.db, id);
+  const row = await getRow(ctx, id);
   if (!row || row.deleted_at) throw new ToolError(`expense ${id} not found`);
   const next = { ...row };
   if (fields.amount !== undefined) next.amount = fields.amount;
   if (fields.currency !== undefined) next.currency = fields.currency;
   if (fields.note !== undefined) next.note = fields.note;
-  if (fields.category !== undefined) next.category = fields.category;
+  if (fields.category !== undefined) next.category = await resolveCategory(ctx, fields.category);
   if (fields.category !== undefined || fields.note !== undefined) next.needs_review = needsReview(next.category, next.note);
   if (fields.date_token !== undefined) {
     const t = today(ctx);
@@ -225,13 +240,13 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
     next.expense_date = d.date;
   }
   await ctx.db
-    .prepare("UPDATE expenses SET amount = ?, currency = ?, category = ?, note = ?, expense_date = ?, needs_review = ? WHERE id = ?")
-    .bind(next.amount, next.currency, next.category, next.note, next.expense_date, next.needs_review, id)
+    .prepare("UPDATE expenses SET amount = ?, currency = ?, category = ?, note = ?, expense_date = ?, needs_review = ? WHERE id = ? AND user_id = ?")
+    .bind(next.amount, next.currency, next.category, next.note, next.expense_date, next.needs_review, id, ctx.userId)
     .run();
-  const updated = (await getRow(ctx.db, id))!;
+  const updated = (await getRow(ctx, id))!;
   // A category you pick by hand is the best label the merchant cache can get.
   if (fields.category !== undefined || fields.note !== undefined) {
-    const learn = learnStatements(ctx.db, [updated], nowIso(ctx));
+    const learn = learnStatements(ctx.db, ctx.userId, [updated], nowIso(ctx));
     if (learn.length) await ctx.db.batch(learn);
   }
   return { updated, before: row, ...(await feedback(ctx, [updated])) };
@@ -248,8 +263,8 @@ export const updateExpenseTool = defineTool({
 
 export async function deleteExpense(ctx: ToolContext, id: string) {
   const res = await ctx.db
-    .prepare("UPDATE expenses SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
-    .bind(nowIso(ctx), id)
+    .prepare("UPDATE expenses SET deleted_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+    .bind(nowIso(ctx), id, ctx.userId)
     .run();
   if (!res.meta.changes) throw new ToolError(`expense ${id} not found or already deleted`);
   return { deleted: id };
@@ -274,30 +289,30 @@ export async function undoRequest(ctx: ToolContext, requestId?: string) {
   if (!target) {
     const last = await ctx.db
       .prepare(
-        "SELECT request_id FROM expenses WHERE deleted_at IS NULL AND request_id <> ? ORDER BY created_at DESC, id DESC LIMIT 1",
+        "SELECT request_id FROM expenses WHERE user_id = ? AND deleted_at IS NULL AND request_id <> ? ORDER BY created_at DESC, id DESC LIMIT 1",
       )
-      .bind(ctx.requestId)
+      .bind(ctx.userId, ctx.requestId)
       .first<{ request_id: string }>();
     if (!last) throw new ToolError("nothing to undo");
     target = last.request_id;
   }
   const active = await ctx.db
-    .prepare("UPDATE expenses SET deleted_at = ? WHERE request_id = ? AND deleted_at IS NULL")
-    .bind(nowIso(ctx), target)
+    .prepare("UPDATE expenses SET deleted_at = ? WHERE user_id = ? AND request_id = ? AND deleted_at IS NULL")
+    .bind(nowIso(ctx), ctx.userId, target)
     .run();
   let action: "removed" | "restored" = "removed";
   let changes = active.meta.changes ?? 0;
   if (!changes) {
     const restored = await ctx.db
-      .prepare("UPDATE expenses SET deleted_at = NULL WHERE request_id = ? AND deleted_at IS NOT NULL")
-      .bind(target)
+      .prepare("UPDATE expenses SET deleted_at = NULL WHERE user_id = ? AND request_id = ? AND deleted_at IS NOT NULL")
+      .bind(ctx.userId, target)
       .run();
     changes = restored.meta.changes ?? 0;
     action = "restored";
     if (!changes) throw new ToolError(`no expenses found for request ${target}`);
   }
   const rows = (
-    await ctx.db.prepare("SELECT * FROM expenses WHERE request_id = ? ORDER BY line_index").bind(target).all<ExpenseRow>()
+    await ctx.db.prepare("SELECT * FROM expenses WHERE user_id = ? AND request_id = ? ORDER BY line_index").bind(ctx.userId, target).all<ExpenseRow>()
   ).results;
   return { request_id: target, action, count: changes, expenses: rows };
 }
