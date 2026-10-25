@@ -2,6 +2,12 @@
 
 ExpenseAgent is a public app: anyone can create an account. The job of the security layer is that **each account only ever reaches its own data**, that guessing passwords or flooding sign-ups doesn't work, and that the shared free quotas can't be drained.
 
+## Reporting a vulnerability
+
+Please **don't open a public issue** for a security problem. Report it privately on GitHub: the repository's **Security** tab → **Report a vulnerability** ([direct link](https://github.com/Yehia3A/expense-agent/security/advisories/new)). Describe what you found and how to reproduce it. Only test against your own account or your own deployment, never other people's data.
+
+This is a personal project with no bug bounty and no guaranteed response time (see the [Disclaimer](../README.md#disclaimer)), but reports are read and fixed as soon as possible.
+
 ## What protects what
 
 | Layer | Protects | How |

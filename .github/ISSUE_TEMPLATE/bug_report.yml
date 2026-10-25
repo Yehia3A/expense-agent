@@ -1,0 +1,43 @@
+name: Bug report
+description: Something doesn't work as it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems don't go here.** Report them privately instead (see the link on the "New issue" page). Never paste passwords, API tokens or personal data into an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Track
+        2. Type "coffee 200 yesterday"
+        3. ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where?
+      options:
+        - Live app (expense-agent.let-apps.workers.dev)
+        - My own deployment
+        - Running locally
+        - MCP client
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      placeholder: e.g. Chrome on Android, Safari on iPhone

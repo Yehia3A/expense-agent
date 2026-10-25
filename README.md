@@ -128,6 +128,19 @@ Then follow [Run locally](#run-locally) to try it on your computer, or [Deploy f
    ```
 4. To suggest a change to the original: push a branch to your fork and open a pull request on GitHub (see below).
 
+## Suggestions, bugs and contributions
+
+Ideas and help are welcome. Here's where each kind goes:
+
+| You have | Put it here |
+|---|---|
+| **An idea for a new feature or an improvement** | [Issues](https://github.com/Yehia3A/expense-agent/issues) → **New issue** → **New feature / suggestion**. It's labelled `enhancement`. |
+| **A bug** (something doesn't work as it should) | [Issues](https://github.com/Yehia3A/expense-agent/issues) → **New issue** → **Bug report**. It's labelled `bug`. |
+| **A security problem** | **Not** a public issue. Report it privately: **Security** tab → **Report a vulnerability** ([how](docs/SECURITY.md#reporting-a-vulnerability)). |
+| **Code** (a fix or a feature you built) | A **pull request** from your fork, following the steps below. For anything big, open a feature issue first, so we can agree on the approach before you spend time on it. |
+
+Please search the existing issues before opening a new one, and never paste passwords, API tokens or personal data into an issue.
+
 ## Contributing: work on your own branch
 
 **Don't push straight to `main`.** `main` is what the live app is built from: once the Cloudflare secrets are set in GitHub, every push to `main` deploys to the live app. Do your work on a separate branch and open a pull request, so changes get reviewed first.

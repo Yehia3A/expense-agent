@@ -1,0 +1,31 @@
+name: New feature / suggestion
+description: Suggest an idea or improvement for ExpenseAgent.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Please check the open issues first so we don't get duplicates.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: The problem or need, in plain words. For example "I want to export a month to CSV for my accountant."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+      description: Your idea for the feature. Screenshots or sketches are welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you do today instead?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to build this myself and open a pull request.
