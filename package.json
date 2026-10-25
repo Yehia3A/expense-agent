@@ -2,6 +2,8 @@
   "name": "expense-agent",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "Yehia Fadly",
   "description": "Natural-language personal expense tracker on Cloudflare Workers + D1",
   "type": "module",
   "scripts": {

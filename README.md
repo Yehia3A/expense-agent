@@ -28,6 +28,19 @@ Runs entirely on Cloudflare's free plan (Workers + D1) with a free Groq model: *
 
 Cloudflare's dashboard (Workers & Pages → `expense-agent`) shows each deployed version and can roll back to an earlier one.
 
+## Disclaimer
+
+**This is a personal, non-commercial project, provided "as is", with no warranty of any kind. Use the live app and the code at your own risk.**
+
+- **Security:** the app has reasonable protections (hashed passwords, private accounts, rate limits; see [docs/SECURITY.md](docs/SECURITY.md)), but it has not been professionally audited and may contain security flaws. Data you enter could be exposed, changed or lost.
+- **Don't store sensitive information.** Never enter bank or card numbers, passwords for other services, ID numbers or anything else you couldn't afford to have leaked. Use a password you don't use anywhere else.
+- **No guarantee of availability or data.** The live app runs on free tiers and may be slow, unavailable, changed, reset or shut down at any time without notice. There are no backups you can rely on; keep your own copy of anything important.
+- **Not financial advice.** Budgets, totals, reports and AI answers may be wrong. Check important numbers yourself and don't base financial decisions on them alone.
+- **AI processing:** messages and voice clips you send to the assistant are processed by a third-party AI provider (Groq) to understand them.
+- **No liability.** The author is not responsible for any loss, damage, cost or claim arising from using the live app, running or deploying this code, or relying on anything it shows. If you deploy your own copy, you are responsible for running and securing it.
+
+By creating an account or using the code, you accept these terms. The code itself is under the [MIT License](LICENSE), which says the same about the software: it comes with no warranty, and the author isn't liable for its use.
+
 ## Architecture
 
 ```mermaid
@@ -277,3 +290,7 @@ Results land in [eval/RESULTS.md](eval/RESULTS.md). The fast-path-only run (no m
 
 - City list (`public/data/cities.json`, rebuilt with `npm run build:cities`): [city-timezones](https://github.com/kevinroberts/city-timezones) (MIT), with city data from [simplemaps.com World Cities Basic](https://simplemaps.com/data/world-cities) (CC BY 4.0).
 - Charts: Chart.js (MIT), vendored in `public/vendor/`.
+
+## License
+
+[MIT](LICENSE) © 2026 Yehia Fadly. You may use, copy, change and share the code, including commercially, as long as you keep the copyright and license notice. It comes with no warranty; see the [Disclaimer](#disclaimer).
