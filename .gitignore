@@ -1,0 +1,17 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+dist/
+*.log
+.DS_Store
+
+# Raw eval runs (summaries live in eval/RESULTS.md)
+eval/results/
+
+# Your own budgets and spreadsheet totals (see data/personal.example.json)
+data/personal.json
+
+# Personal Claude Code settings
+.claude/settings.local.json

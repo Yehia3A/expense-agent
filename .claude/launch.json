@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock-llm",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/mock-llm.mjs"],
+      "port": 8788
+    },
+    {
+      "name": "dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8787"],
+      "port": 8787
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "months": {
+    "2026-10": { "transport_fuel": 600, "entertainment": 1200 }
+  },
+  "expected_totals": { "2026-10": 1800 }
+}

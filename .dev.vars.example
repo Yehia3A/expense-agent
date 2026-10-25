@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
+# Groq: https://console.groq.com/keys   OpenRouter: https://openrouter.ai/keys
+LLM_API_KEY=

@@ -1,0 +1,21 @@
+{
+  "_note": "Copy to data/personal.json (gitignored) and put your own numbers in. budgets.amounts: monthly budget per category key (omit or null = untracked). legacy: monthly category totals from an old spreadsheet, imported as totals (never as fake transactions); every month in expected_totals must add up exactly or the import stops.",
+  "budgets": {
+    "month": "2026-10",
+    "amounts": {
+      "food_dining": 4000,
+      "groceries": 5000,
+      "transport_fuel": 2500,
+      "bills_utilities": 2000,
+      "entertainment": 1000,
+      "sports": 1500,
+      "other": 10000
+    }
+  },
+  "legacy": {
+    "months": {
+      "2026-09": { "groceries": 4200, "food_dining": 2600, "transport_fuel": 1900 }
+    },
+    "expected_totals": { "2026-09": 8700 }
+  }
+}
