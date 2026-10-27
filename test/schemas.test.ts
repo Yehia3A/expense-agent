@@ -35,7 +35,7 @@ describe("tool JSON schemas sent to the LLM (D16)", () => {
     };
     const item = add.properties.items.items;
     expect(item.properties.category!.enum).toBeUndefined();
-    expect(Object.keys(item.properties).sort()).toEqual(["amount", "category", "currency", "date_token", "note"]);
+    expect(Object.keys(item.properties).sort()).toEqual(["amount", "category", "currency", "date_token", "details", "note"]);
     expect(item.required.sort()).toEqual(["amount", "category", "note"]);
   });
 });

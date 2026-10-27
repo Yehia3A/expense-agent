@@ -362,3 +362,8 @@ body.driving { overflow: hidden; }
 .city-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .city-status { margin: 0; }
 .city-status:empty { display: none; }
+
+/* ---------- expense notes (D47) ---------- */
+.edit-item { display: grid; gap: 6px; }
+.edit-item textarea { width: 100%; min-width: 160px; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 13px; resize: vertical; }
+.notes-cell { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 180px; }

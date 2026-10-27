@@ -4,7 +4,7 @@ import { ulid } from "../lib/ulid";
 import { budgetStatus, type BudgetRow, statusLine } from "./budgets";
 import { currencyOf, largeAmountFor } from "./currency";
 import { learnStatements } from "./merchants";
-import { resolveCategory } from "./categories";
+import { OTHER_KEY, resolveCategory } from "./categories";
 import { CategoryInput, type CategoryKey, defineTool, type ExpenseRow, today, ToolError, type ToolContext } from "./types";
 
 const DATE_TOKEN_HELP =
@@ -18,6 +18,7 @@ const Currency = z
   .regex(/^[A-Za-z]{3}$/, "3-letter currency code")
   .transform((s) => s.toUpperCase());
 const Note = z.string().trim().min(1).max(200);
+const Details = z.string().trim().max(300);
 
 export const ItemInput = z.object({
   amount: Amount.describe("Amount as a positive number. Never guess: ask if the user did not give one."),
@@ -25,6 +26,10 @@ export const ItemInput = z.object({
   category: CategoryInput.describe("A category key from the list in the system prompt."),
   note: Note.describe("Short description in the user's words, e.g. 'coffee', 'vegs'."),
   date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
+  details: Details.nullable().optional().describe(
+    "Notes, ONLY for an out-of-the-ordinary one-off the user explains (a repair, a fine, a medical bill), " +
+      "e.g. 'Fixing the car's wheel bearing'. Omit for everyday spending. An item with notes is filed under other.",
+  ),
 });
 export type ItemInput = z.infer<typeof ItemInput>;
 
@@ -34,6 +39,7 @@ interface ResolvedItem {
   category: CategoryKey;
   note: string;
   expense_date: string;
+  details: string | null;
 }
 
 const nowIso = (ctx: ToolContext) => ctx.now().toISOString();
@@ -43,7 +49,9 @@ const nowIso = (ctx: ToolContext) => ctx.now().toISOString();
 // is flagged for review because it probably belongs in a real category.
 const INVESTMENT_NOTE = /thndr|index fund|\bfund\b|gold|dahab|bitcoin|\bbtc\b|binance|crypto|usdt|invest|saving|ادخار|استثمار|دهب|ذهب/i;
 
-export function needsReview(category: CategoryKey, note: string): 0 | 1 {
+export function needsReview(category: CategoryKey, note: string, details?: string | null): 0 | 1 {
+  // An item with notes (D47) was filed under other on purpose: no review needed.
+  if (details) return 0;
   return category === "other" && !INVESTMENT_NOTE.test(note) ? 1 : 0;
 }
 
@@ -52,7 +60,7 @@ async function getRow(ctx: ToolContext, id: string): Promise<ExpenseRow | null> 
 }
 
 /** Budget status for each (category, month) touched, plus one human status line per saved row. */
-async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "expense_date" | "note" | "amount" | "currency">[]) {
+async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "expense_date" | "note" | "amount" | "currency" | "details">[]) {
   const months = [...new Set(rows.map((r) => monthOf(r.expense_date)))];
   const home = await currencyOf(ctx);
   const byMonth = new Map(await Promise.all(months.map(async (m) => [m, await budgetStatus(ctx.db, ctx.userId, m, home)] as const)));
@@ -68,7 +76,8 @@ async function feedback(ctx: ToolContext, rows: Pick<ExpenseRow, "category" | "e
     }
     const cur = r.currency === home ? "" : ` ${r.currency}`;
     const when = r.expense_date === today(ctx) ? "" : ` on ${r.expense_date}`;
-    return `Added ${r.note} ${r.amount}${cur}${when}. ${statusLine(status)}`;
+    const notes = r.details ? " Note saved (shown in the Report)." : "";
+    return `Added ${r.note} ${r.amount}${cur}${when}. ${statusLine(status)}${notes}`;
   });
   return { budget: affected, status_lines: lines };
 }
@@ -91,7 +100,8 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
   const keys: (string | null)[] = [];
   for (const item of items) {
     try {
-      keys.push(await resolveCategory(ctx, item.category));
+      // D47: an unusual one-off with notes always goes to Other.
+      keys.push(item.details?.trim() ? OTHER_KEY : await resolveCategory(ctx, item.category));
     } catch (e) {
       if (!(e instanceof ToolError)) throw e;
       keys.push(null);
@@ -112,7 +122,7 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
     const large = largeAmountFor(currency, ctx.config);
     if (large !== null && item.amount > large) reasons.push(`amount ${item.amount} is above ${large} ${currency}`);
     if (check.old) reasons.push(`date ${d.date} is more than ${ctx.config.oldDateConfirmDays} days ago`);
-    resolved.push({ amount: item.amount, currency, category, note: item.note, expense_date: d.date, reasons });
+    resolved.push({ amount: item.amount, currency, category, note: item.note, expense_date: d.date, details: item.details?.trim() || null, reasons });
   });
 
   if (errors.length) return { status: "error", errors };
@@ -133,8 +143,8 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
     ctx.db
       .prepare(
         `INSERT INTO expenses (id, user_id, amount, currency, category, expense_date, note, needs_review,
-                               source, request_id, line_index, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               source, request_id, line_index, created_at, details)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (user_id, request_id, line_index) DO NOTHING`,
       )
       .bind(
@@ -145,11 +155,12 @@ export async function addExpenses(ctx: ToolContext, items: ItemInput[], confirme
         r.category,
         r.expense_date,
         r.note,
-        needsReview(r.category, r.note),
+        needsReview(r.category, r.note, r.details),
         ctx.source,
         ctx.requestId,
         first + i,
         created,
+        r.details,
       ),
   );
   await ctx.db.batch(stmts);
@@ -258,6 +269,7 @@ export const UpdateFields = z
     category: CategoryInput.optional(),
     note: Note.optional(),
     date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
+    details: Details.nullable().optional().describe("Notes for the expense; empty string or null removes them."),
   })
   .refine((f) => Object.values(f).some((v) => v !== undefined), "no fields to update");
 
@@ -268,8 +280,11 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
   if (fields.amount !== undefined) next.amount = fields.amount;
   if (fields.currency !== undefined) next.currency = fields.currency;
   if (fields.note !== undefined) next.note = fields.note;
+  if (fields.details !== undefined) next.details = fields.details?.trim() || null;
   if (fields.category !== undefined) next.category = await resolveCategory(ctx, fields.category);
-  if (fields.category !== undefined || fields.note !== undefined) next.needs_review = needsReview(next.category, next.note);
+  if (fields.category !== undefined || fields.note !== undefined || fields.details !== undefined) {
+    next.needs_review = needsReview(next.category, next.note, next.details);
+  }
   if (fields.date_token !== undefined) {
     const t = today(ctx);
     const d = resolveDateToken(fields.date_token, t);
@@ -279,8 +294,8 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
     next.expense_date = d.date;
   }
   await ctx.db
-    .prepare("UPDATE expenses SET amount = ?, currency = ?, category = ?, note = ?, expense_date = ?, needs_review = ? WHERE id = ? AND user_id = ?")
-    .bind(next.amount, next.currency, next.category, next.note, next.expense_date, next.needs_review, id, ctx.userId)
+    .prepare("UPDATE expenses SET amount = ?, currency = ?, category = ?, note = ?, expense_date = ?, needs_review = ?, details = ? WHERE id = ? AND user_id = ?")
+    .bind(next.amount, next.currency, next.category, next.note, next.expense_date, next.needs_review, next.details, id, ctx.userId)
     .run();
   const updated = (await getRow(ctx, id))!;
   // A category you pick by hand is the best label the merchant cache can get.
@@ -293,7 +308,7 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
 
 export const updateExpenseTool = defineTool({
   name: "update_expense",
-  description: "Change fields of a saved expense by id (amount, currency, category, note or date).",
+  description: "Change fields of a saved expense by id (amount, currency, category, note, date or notes/details).",
   input: z.object({ id: z.string().min(1), fields: UpdateFields }),
   async run(ctx, input) {
     return updateExpense(ctx, input.id, input.fields);

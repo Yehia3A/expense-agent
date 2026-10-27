@@ -146,6 +146,7 @@ function startEdit(tr, r) {
   row.querySelector("[name=date]").max = localToday();
   row.querySelector("[name=note]").value = r.note;
   row.querySelector("[name=amount]").value = r.amount;
+  row.querySelector("[name=details]").value = r.details ?? "";
   const sel = row.querySelector("[name=category]");
   for (const c of state.categories) sel.append(el("option", { value: c.key, selected: c.key === r.category }, c.display_name));
   tr.replaceWith(row);
@@ -158,6 +159,7 @@ function startEdit(tr, r) {
       note: row.querySelector("[name=note]").value.trim(),
       category: sel.value,
       date_token: `date:${row.querySelector("[name=date]").value}`,
+      details: row.querySelector("[name=details]").value.trim() || null,
     };
     try {
       await api(`/api/expenses/${r.id}`, { method: "PATCH", body: { fields } });

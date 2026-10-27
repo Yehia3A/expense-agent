@@ -111,7 +111,7 @@ function renderPending(bubble, pending) {
   confirmBtn.addEventListener("click", async () => {
     confirmBtn.disabled = cancelBtn.disabled = true;
     try {
-      const items = pending.items.map(({ amount, currency, category, note, date_token }) => ({ amount, currency, category, note, date_token }));
+      const items = pending.items.map(({ amount, currency, category, note, date_token, details }) => ({ amount, currency, category, note, date_token, ...(details ? { details } : {}) }));
       const r = await api("/api/expenses", { method: "POST", body: { request_id: pending.request_id, items, confirmed: true } });
       actions.replaceChildren(el("ul", { class: "status" }, r.status_lines.map((l) => el("li", {}, l))), undoButton(pending.request_id));
       dataChanged();

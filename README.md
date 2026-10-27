@@ -67,6 +67,8 @@ flowchart TD
 
 **City and currency:** type your city and pick it from about 7,300 cities; "today" and months follow its time zone. Pick a currency from 30 main ones or type any ISO code. Budgets and totals are in that currency; an expense in another currency (`taxi 20 USD`) is kept but not added to totals. Changing currency relabels, it never converts. Both are in the account menu.
 
+**Notes on unusual spending:** say `2000 for fixing car wheel bearing` and the AI files it under Other with a note ("Fixing the car's wheel bearing"); everyday items never get one. You can add or edit a note on any expense with Edit. Notes appear only on the Report page.
+
 **Quick log:** the 5 things you log most appear as one-tap buttons above the chat box, with the amount you paid last time. A tap saves it without the AI, with Undo.
 
 **Voice and driving mode:** tap the mic next to Send and speak; it stops by itself when you stop talking and puts the text in the box. **Driving mode** is one huge button: tap, speak, and the expense is sent after a 3-second countdown you can cancel, with the screen kept on. Both are free (Groq Whisper) and work in every browser, including Brave and iPhone Safari.
@@ -263,7 +265,7 @@ Other holds what is left each month after spending, invested in an index fund, g
 npm test
 ```
 
-About 270 tests: dates around midnight in summer and winter time, every tool, budgets and copy-forward, reports and history (including a check that every view agrees), the fast path and merchant cache, the `/chat` loop with a scripted LLM, the fallback model and the shared AI cap, MCP, quick log, currencies, per-account time zones, sign-up, sessions, API tokens and account deletion, **cross-account isolation**, Access JWT verification with a fake issuer, CSRF and rate limits.
+About 280 tests: dates around midnight in summer and winter time, every tool, budgets and copy-forward, reports and history (including a check that every view agrees), the fast path and merchant cache, the `/chat` loop with a scripted LLM, the fallback model and the shared AI cap, MCP, quick log, currencies, per-account time zones, sign-up, sessions, API tokens and account deletion, **cross-account isolation**, Access JWT verification with a fake issuer, CSRF and rate limits.
 
 ```bash
 npm run eval -- --mode fastpath

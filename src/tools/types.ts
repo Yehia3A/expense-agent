@@ -60,4 +60,6 @@ export interface ExpenseRow {
   line_index: number;
   created_at: string;
   deleted_at: string | null;
+  /** Optional notes for an unusual one-off (D47); shown only in the monthly report. */
+  details: string | null;
 }

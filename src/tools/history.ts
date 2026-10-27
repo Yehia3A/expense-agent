@@ -35,7 +35,7 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
   const status = await budgetStatus(ctx.db, ctx.userId, month, await currencyOf(ctx));
   const live = "user_id = ? AND deleted_at IS NULL AND currency = ? AND expense_date >= ? AND expense_date < ?";
   const args = [ctx.userId, await currencyOf(ctx), start, end];
-  const [topRows, items, days, review] = await ctx.db.batch<Record<string, unknown>>([
+  const [topRows, items, days, review, notes] = await ctx.db.batch<Record<string, unknown>>([
     ctx.db.prepare(`SELECT * FROM expenses WHERE ${live} ORDER BY amount DESC, expense_date DESC LIMIT 5`).bind(...args),
     ctx.db
       .prepare(`SELECT lower(trim(note)) AS item, SUM(amount) AS total, COUNT(*) AS count FROM expenses WHERE ${live} GROUP BY item`)
@@ -45,6 +45,14 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
       .prepare(
         `SELECT * FROM expenses WHERE user_id = ? AND deleted_at IS NULL AND needs_review = 1 AND expense_date >= ? AND expense_date < ?
          ORDER BY expense_date DESC, id DESC`,
+      )
+      .bind(ctx.userId, start, end),
+    // D47: expenses with notes, any currency, oldest first. Notes are shown only here.
+    ctx.db
+      .prepare(
+        `SELECT id, expense_date, note, amount, currency, category, details FROM expenses
+         WHERE user_id = ? AND deleted_at IS NULL AND details IS NOT NULL AND details <> '' AND expense_date >= ? AND expense_date < ?
+         ORDER BY expense_date, created_at`,
       )
       .bind(ctx.userId, start, end),
   ]);
@@ -98,6 +106,7 @@ export async function monthlyReport(ctx: ToolContext, month: string) {
         }
       : null,
     needs_review: review!.results as unknown as ExpenseRow[],
+    notes: notes!.results as unknown as Pick<ExpenseRow, "id" | "expense_date" | "note" | "amount" | "currency" | "category" | "details">[],
     other_currencies: status.other_currencies,
   };
 }
@@ -107,7 +116,7 @@ export const monthlyReportTool = defineTool({
   description:
     "Full report for one month: total vs last month (amount and %), category breakdown with shares, top 5 expenses, " +
     "top items by total and by frequency, daily totals, average per day, highest day, month-end projection (current month only) " +
-    "and expenses that need review. Quote its numbers exactly.",
+    "expenses that need review, and expenses with notes. Quote its numbers exactly.",
   input: z.object({ month: MonthInput }),
   async run(ctx, input) {
     return monthlyReport(ctx, input.month ?? monthOf(today(ctx)));

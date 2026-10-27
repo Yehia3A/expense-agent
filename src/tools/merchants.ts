@@ -18,6 +18,7 @@ export async function lookupCategory(
   note: string,
   allowed?: Set<string>,
   useShared = true,
+  exactOnly = false,
 ): Promise<CategoryKey | null> {
   const term = normalizeTerm(note);
   const words = [...new Set(term.split(" ").filter((w) => w.length >= 3))];
@@ -41,24 +42,25 @@ export async function lookupCategory(
 
   const exact = best.get(term);
   if (exact) return exact;
-  if (words.length < 2) return null; // a one-word note would have matched exactly
+  if (exactOnly || words.length < 2) return null; // a one-word note would have matched exactly
   const found = new Set(words.map((w) => best.get(w)).filter((c): c is CategoryKey => !!c));
   return found.size === 1 ? [...found][0]! : null;
 }
 
 /**
  * Remember note -> category for this user's saved rows. Rows flagged for
- * review are skipped (the category is a guess). A different category for a
+ * review are skipped (the category is a guess), and so are one-offs with notes
+ * (D47). A different category for a
  * known term replaces it, so a manual correction always sticks.
  */
 export function learnStatements(
   db: D1Database,
   userId: string,
-  rows: Pick<ExpenseRow, "note" | "category" | "needs_review">[],
+  rows: (Pick<ExpenseRow, "note" | "category" | "needs_review"> & { details?: string | null })[],
   nowIso: string,
 ) {
   return rows
-    .filter((r) => !r.needs_review)
+    .filter((r) => !r.needs_review && !r.details)
     .map((r) =>
       db
         .prepare(

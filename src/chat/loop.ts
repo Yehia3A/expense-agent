@@ -28,7 +28,7 @@ export type ChatRequest = z.infer<typeof ChatRequest>;
 
 export interface PendingConfirmation {
   request_id: string;
-  items: { amount: number; currency: string; category: string; note: string; date_token: string; expense_date: string; reasons: string[] }[];
+  items: { amount: number; currency: string; category: string; note: string; date_token: string; expense_date: string; details?: string | null; reasons: string[] }[];
 }
 
 export interface ChatResponse {
@@ -147,7 +147,7 @@ function collect(out: ChatResponse, name: string, outcome: ToolOutcome) {
   if (name !== "add_expense") return;
   const r = outcome.result as
     | { status: "saved"; saved: ExpenseRow[]; status_lines: string[] }
-    | { status: "needs_confirmation"; items: { amount: number; currency: string; category: string; note: string; expense_date: string; reasons: string[] }[] }
+    | { status: "needs_confirmation"; items: { amount: number; currency: string; category: string; note: string; expense_date: string; details?: string | null; reasons: string[] }[] }
     | { status: "error" };
   if (r.status === "saved") {
     out.saved.push(...r.saved);

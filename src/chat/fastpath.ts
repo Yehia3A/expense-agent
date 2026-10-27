@@ -108,7 +108,11 @@ export async function fastPath(db: D1Database, userId: string, message: string) 
   const items: { note: string; amount: number; currency?: string; category: CategoryKey; date_token?: string }[] = [];
   for (const it of parsed.items) {
     const useShared = !stems(it.note).some((w) => customWords.has(w));
-    const category = await lookupCategory(db, userId, it.note, allowed, useShared);
+    // D47: a longer description ("fixing car wheel bearing") is often an unusual
+    // one-off; matching it on a single word ("car") would file it wrongly, so
+    // 3+ word items only take the fast path when the whole phrase is known.
+    const exactOnly = it.note.split(" ").length >= 3;
+    const category = await lookupCategory(db, userId, it.note, allowed, useShared, exactOnly);
     if (!category) return null;
     items.push({ ...it, category, ...(parsed.date_token ? { date_token: parsed.date_token } : {}) });
   }

@@ -203,7 +203,7 @@
           <h2>Chat</h2>
           <button type="button" id="drive-open" class="drive-open" aria-label="Driving mode: one big button for voice">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h14M6 17v2M18 17v2M4 13l2-6h12l2 6v4H4z"/><circle cx="7.5" cy="14" r="1"/><circle cx="16.5" cy="14" r="1"/></svg>
-            Driving mode
+            Voice mode
           </button>
         </div>
         <div id="log" class="log" aria-live="polite">
@@ -294,6 +294,17 @@
           <div id="report-items"></div>
         </section>
 
+        <section id="report-notes-card" class="card wide" aria-labelledby="rn-h" hidden>
+          <h3 id="rn-h">Notes</h3>
+          <p class="muted small">Unusual expenses this month and what they were for.</p>
+          <div class="table-wrap">
+            <table id="report-notes" class="grid">
+              <thead><tr><th>Date</th><th>Item</th><th class="num">Amount</th><th>Notes</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
         <section id="report-review-card" class="card wide" aria-labelledby="rr-h" hidden>
           <h3 id="rr-h">Needs review</h3>
           <p class="muted small">Filed under Other but not an investment. Edit to move each into its real category.</p>
@@ -371,7 +382,7 @@
   <template id="tpl-edit">
     <tr class="editing">
       <td><input type="date" name="date" required aria-label="Date"></td>
-      <td><input name="note" maxlength="200" required aria-label="Item"></td>
+      <td class="edit-item"><input name="note" maxlength="200" required aria-label="Item"><textarea name="details" maxlength="300" rows="2" placeholder="Notes (optional), shown in the Report" aria-label="Notes"></textarea></td>
       <td><select name="category" aria-label="Category"></select></td>
       <td class="num"><input name="amount" type="number" min="0.01" step="0.01" required aria-label="Amount"></td>
       <td class="actions"><button type="button" data-act="save" class="small">Save</button><button type="button" data-act="cancel" class="ghost small">Cancel</button></td>

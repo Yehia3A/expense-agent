@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Notes on unusual expenses: say "2000 for fixing car wheel bearing" and it's filed under Other with a note; add or edit notes yourself with Edit. Notes show only on the Report page (migration 0011).
+
 ## 0.8.0 (2026-10-21): Your own budget, voice, driving mode
 
 - Each account sets up its own categories (up to 10, suggestions or free text, any language) with monthly budgets, plus Other; edit them any time; renaming keeps history (migration 0008).

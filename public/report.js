@@ -95,6 +95,22 @@ function render(r) {
       : el("p", { class: "muted small" }, "No transactions this month."),
   );
 
+  // Notes (D47): unusual one-offs and what they were for. Shown only here.
+  const noted = r.notes ?? [];
+  $("#report-notes-card").hidden = noted.length === 0;
+  $("#report-notes tbody").replaceChildren(
+    ...noted.map((n) =>
+      el(
+        "tr",
+        {},
+        el("td", { class: "nowrap" }, n.expense_date),
+        el("td", {}, n.note),
+        el("td", { class: "num" }, money(n.amount, n.currency)),
+        el("td", { class: "notes-cell" }, n.details),
+      ),
+    ),
+  );
+
   // Needs review: editable rows, so a fix is one click away.
   $("#report-review-card").hidden = r.needs_review.length === 0;
   $("#report-review tbody").replaceChildren(...r.needs_review.map(expenseRow));
