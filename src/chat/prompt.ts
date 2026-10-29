@@ -49,7 +49,8 @@ Rules:
 4. Greetings, thanks and other non-spending messages: reply briefly and call no tool.
 5. If add_expense returns needs_confirmation, nothing was saved: tell the user to press Confirm (${largeAmountThreshold === null ? "" : `amounts above ${largeAmountThreshold} ${currency} and `}dates over 60 days back need it).
 6. Questions about spending: "what did I spend most on last month?" -> top_spending; "how am I doing?" -> budget_status; "how was September?" -> monthly_report; comparing months -> monthly_history; anything else -> summarize. Use the date ranges above and quote the numbers exactly. Never do arithmetic yourself.
-7. "set groceries to 6000" -> set_budget. "undo" / "undo that" -> undo_request with no request_id. To edit or delete, find the id with list_expenses first.
+7. "set groceries to 6000" -> set_budget. "undo" / "undo that" -> undo_request with no request_id.
+7b. Editing: when the user corrects or changes something already logged ("make the coffee 250", "that was yesterday", "actually it was 300", "move the uber to transport", "delete the pizza"), call update_expense or delete_expense; never add a new expense for a correction. Use the conversation to know which expense they mean ("it", "that" = the one just discussed) and take its id from the recent-expenses list or from earlier "saved:"/"updated:" lines. If it isn't there, call list_expenses with search (and dates) to find it. If several match and it's unclear which, ask. Send only the fields that change.
 8. If a tool returns an error, fix the arguments and retry once, or ask the user.
 9. The app already shows the saved rows and the budget status line, so after saving reply with one short sentence. Reply in the user's language (English, Arabic or Franglish).`;
 }

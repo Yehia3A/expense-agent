@@ -198,6 +198,7 @@ export const listExpensesTool = defineTool({
     start_date: DateInput.optional().describe("YYYY-MM-DD, inclusive. Default: 30 days ago."),
     end_date: DateInput.optional().describe("YYYY-MM-DD, inclusive. Default: today."),
     category: CategoryInput.optional(),
+    search: z.string().trim().min(1).max(60).optional().describe("Words from the item or its notes, e.g. 'coffee'. Case-insensitive."),
     limit: z.number().int().min(1).max(500).default(100),
   }),
   async run(ctx, input) {
@@ -209,6 +210,11 @@ export const listExpensesTool = defineTool({
     if (input.category) {
       sql += " AND category = ?";
       args.push(await resolveCategory(ctx, input.category));
+    }
+    if (input.search) {
+      const like = `%${input.search.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      sql += " AND (lower(note) LIKE ? ESCAPE '\\' OR lower(COALESCE(details, '')) LIKE ? ESCAPE '\\')";
+      args.push(like, like);
     }
     sql += " ORDER BY expense_date DESC, id DESC LIMIT ?";
     args.push(input.limit);
@@ -269,7 +275,7 @@ export const UpdateFields = z
     category: CategoryInput.optional(),
     note: Note.optional(),
     date_token: z.string().max(40).optional().describe(DATE_TOKEN_HELP),
-    details: Details.nullable().optional().describe("Notes for the expense; empty string or null removes them."),
+    details: Details.nullable().optional().describe("Notes for the expense; an empty string removes them. Omit to keep them."),
   })
   .refine((f) => Object.values(f).some((v) => v !== undefined), "no fields to update");
 
@@ -308,7 +314,9 @@ export async function updateExpense(ctx: ToolContext, id: string, fields: z.infe
 
 export const updateExpenseTool = defineTool({
   name: "update_expense",
-  description: "Change fields of a saved expense by id (amount, currency, category, note, date or notes/details).",
+  description:
+    "Change fields of a saved expense by id (amount, currency, category, note, date or notes/details). " +
+    "Use it when the user corrects or changes an expense they already logged; send only the fields that change.",
   input: z.object({ id: z.string().min(1), fields: UpdateFields }),
   async run(ctx, input) {
     return updateExpense(ctx, input.id, input.fields);

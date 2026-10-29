@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Notes on unusual expenses: say "2000 for fixing car wheel bearing" and it's filed under Other with a note; add or edit notes yourself with Edit. Notes show only on the Report page (migration 0011).
+- Edit from chat: "make the coffee 250", "that was yesterday", "delete the pizza" now change the expense you logged instead of failing or adding a new one. The assistant also remembers the whole chat on the page, not just the last few messages.
 
 ## 0.8.0 (2026-10-21): Your own budget, voice, driving mode
 

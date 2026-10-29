@@ -69,6 +69,8 @@ flowchart TD
 
 **Notes on unusual spending:** say `2000 for fixing car wheel bearing` and the AI files it under Other with a note ("Fixing the car's wheel bearing"); everyday items never get one. You can add or edit a note on any expense with Edit. Notes appear only on the Report page.
 
+**Edit from chat:** fix a mistake in words, e.g. `make the coffee 250`, `that was yesterday`, `move the uber to transport` or `delete the pizza`. The assistant knows your latest expenses and the whole conversation on the page, so "it" and "that" mean what you were just talking about.
+
 **Quick log:** the 5 things you log most appear as one-tap buttons above the chat box, with the amount you paid last time. A tap saves it without the AI, with Undo.
 
 **Voice and driving mode:** tap the mic next to Send and speak; it stops by itself when you stop talking and puts the text in the box. **Driving mode** is one huge button: tap, speak, and the expense is sent after a 3-second countdown you can cancel, with the screen kept on. Both are free (Groq Whisper) and work in every browser, including Brave and iPhone Safari.

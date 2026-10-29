@@ -38,7 +38,10 @@ const TODAY_WORDS = ["today", "ennaharda", "el naharda", "elnaharda", "النه�
 // Anything that looks like a question, a command, another date or another
 // currency is the LLM's job.
 const REFUSE =
-  /[?؟$€£]|\b(how|what|which|when|why|who|did|does|do|is|was|are|were|spent|spend|paid|pay|budget|set|undo|redo|delete|remove|change|edit|update|total|much|many|show|list|report|last|ago|week|month|year|tomorrow|ago|day|days|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|usd|eur|gbp|dollars?|euros?|sar|aed|kwd|qar|inr|rs|yen|lira|dirhams?|riyals?|ريال|درهم|دولار|يورو|for me|not|no|cancel|maybe|about|around|approx|each|per|x)\b|\d+\s*(st|nd|rd|th)\b|\d{1,4}[-/]\d{1,2}/i;
+  /[?؟$€£]|\b(how|what|which|when|why|who|did|does|do|is|was|are|were|spent|spend|paid|pay|budget|set|undo|redo|delete|remove|change|edit|update|actually|make|fix|correct|wrong|instead|should|rename|move|mistake|oops|sorry|it|that|this|the|ghayar|8ayar|8ayyar|3adel|3addel|emsa7|5aleh|5aleha|5alih|khaleha|total|much|many|show|list|report|last|ago|week|month|year|tomorrow|ago|day|days|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|usd|eur|gbp|dollars?|euros?|sar|aed|kwd|qar|inr|rs|yen|lira|dirhams?|riyals?|ريال|درهم|دولار|يورو|for me|not|no|cancel|maybe|about|around|approx|each|per|x)\b|\d+\s*(st|nd|rd|th)\b|\d{1,4}[-/]\d{1,2}/i;
+
+//  doesn't see Arabic letters as word characters, so Arabic words get their own check.
+const REFUSE_AR = /(?:^|[\s,.،])(غير|غيّر|عدل|عدّل|امسح|شيل|خلي|خليها|خليه|بدل|ريال|درهم|دولار|يورو|كام|ليه|امتى)(?=$|[\s,.،?؟])/u;
 
 // Egyptian pound words: the item is in EGP whatever the account currency is (D45).
 const CURRENCY = String.raw`(egp|le|l\.e\.?|pounds?|gneh|geneh|جنيه|ج\.?م|ج)`;
@@ -71,7 +74,7 @@ export function parseFast(message: string): FastParse | null {
   const t = stripWord(text, TODAY_WORDS);
   text = t.text;
   if (y.found && t.found) return null;
-  if (REFUSE.test(text)) return null;
+  if (REFUSE.test(text) || REFUSE_AR.test(text)) return null;
 
   const parts = text.split(SPLIT).map((p) => p.trim()).filter(Boolean);
   if (!parts.length || parts.length > 15) return null;

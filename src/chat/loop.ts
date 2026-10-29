@@ -4,7 +4,7 @@ import { addDays, localDate } from "../lib/dates";
 import { ulid } from "../lib/ulid";
 import { checkLimits } from "../security/ratelimit";
 import { hintFor, userCategories } from "../tools/categories";
-import { addExpenses } from "../tools/expenses";
+import { addExpenses, recentExpenses } from "../tools/expenses";
 import { callTool, toolJsonSchemas, type ToolOutcome } from "../tools/registry";
 import type { ExpenseRow, ToolContext } from "../tools/types";
 import { fastPath } from "./fastpath";
@@ -15,13 +15,17 @@ import { currencyOf, largeAmountFor } from "../tools/currency";
 export const MAX_ITERATIONS = 6;
 export const DEADLINE_MS = 25_000;
 const MAX_TOOL_RESULT_CHARS = 8_000;
+/** How much of the conversation goes back to the model (oldest turns drop first). */
+export const HISTORY_CHAR_BUDGET = 6_000;
+/** Recent expenses (with ids) shown to the model so it can edit them directly (D48). */
+export const RECENT_FOR_MODEL = 15;
 
 export const ChatRequest = z.object({
   message: z.string().trim().min(1).max(2000),
   request_id: z.string().min(8).max(100).regex(/^[A-Za-z0-9_:-]+$/),
   history: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(2000) }))
-    .max(10)
+    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) }))
+    .max(100)
     .default([]),
 });
 export type ChatRequest = z.infer<typeof ChatRequest>;
@@ -45,6 +49,8 @@ export interface ChatResponse {
   usage?: Usage;
   replayed?: boolean;
   error?: string;
+  /** What the tools did, with ids, for the client to send back in history (D48). */
+  memo?: string;
 }
 
 const MUTATING = new Set(["add_expense", "update_expense", "delete_expense", "undo_request", "set_budget"]);
@@ -138,8 +144,19 @@ export async function runChat(env: Env, userId: string, req: ChatRequest, deps: 
   return out;
 }
 
+/** One short line per expense: enough for the model to find and edit it. */
+export function rowLine(r: Pick<ExpenseRow, "id" | "expense_date" | "amount" | "currency" | "category" | "note" | "details">): string {
+  return `id=${r.id} | ${r.expense_date} | ${r.amount} ${r.currency} | ${r.category} | ${r.note}${r.details ? ` | notes: ${r.details}` : ""}`;
+}
+
+function addMemo(out: ChatResponse, line: string) {
+  out.memo = out.memo ? `${out.memo}\n${line}` : line;
+}
+
 function collect(out: ChatResponse, name: string, outcome: ToolOutcome) {
   if (!outcome.ok) return;
+  if (name === "update_expense") addMemo(out, `updated: ${rowLine((outcome.result as { updated: ExpenseRow }).updated)}`);
+  if (name === "delete_expense") addMemo(out, `deleted: id=${(outcome.result as { deleted: string }).deleted}`);
   if (MUTATING.has(name)) {
     const r = outcome.result as { status?: string };
     if (name !== "add_expense" || r.status === "saved") out.changed = true;
@@ -150,6 +167,7 @@ function collect(out: ChatResponse, name: string, outcome: ToolOutcome) {
     | { status: "needs_confirmation"; items: { amount: number; currency: string; category: string; note: string; expense_date: string; details?: string | null; reasons: string[] }[] }
     | { status: "error" };
   if (r.status === "saved") {
+    for (const row of r.saved) addMemo(out, `saved: ${rowLine(row)}`);
     out.saved.push(...r.saved);
     out.status_lines.push(...r.status_lines);
   } else if (r.status === "needs_confirmation") {
@@ -214,9 +232,16 @@ async function runLlm(
     examples: examples.get(c.key),
   }));
   const currency = await currencyOf(ctx);
+  const latest = await recentExpenses(ctx, RECENT_FOR_MODEL);
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt(localDate(ctx.now(), ctx.config.tz), categories, largeAmountFor(currency, ctx.config), currency, ctx.config.tz) },
-    ...req.history,
+    {
+      role: "system",
+      content: latest.length
+        ? `The user's ${latest.length} most recently logged expenses, newest first (id | date | amount | category | item | notes):\n${latest.map(rowLine).join("\n")}`
+        : "The user has no expenses logged yet.",
+    },
+    ...trimHistory(req.history),
     { role: "user", content: req.message },
   ];
   const tools = toolJsonSchemas();
@@ -244,7 +269,7 @@ async function runLlm(
       let args: unknown;
       let outcome: ToolOutcome;
       try {
-        args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        args = dropNulls(call.function.arguments ? JSON.parse(call.function.arguments) : {});
         outcome = await callTool(ctx, call.function.name, args);
       } catch (e) {
         if (!(e instanceof SyntaxError)) throw e;
@@ -254,7 +279,7 @@ async function runLlm(
       toolLog.push({ name: call.function.name, args, ok: outcome.ok });
       results.push(outcome);
       collect(out, call.function.name, outcome);
-      const content = JSON.stringify(outcome);
+      const content = JSON.stringify(forModel(call.function.name, outcome));
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -262,4 +287,32 @@ async function runLlm(
       });
     }
   }
+}
+
+/**
+ * The newest turns that fit the budget, starting with a user turn. The whole
+ * visible chat is sent; only very long ones lose their oldest turns.
+ */
+export function trimHistory(history: ChatRequest["history"], budget = HISTORY_CHAR_BUDGET): ChatRequest["history"] {
+  let used = 0;
+  let start = history.length;
+  while (start > 0 && used + history[start - 1]!.content.length <= budget) used += history[--start]!.content.length;
+  while (start < history.length && history[start]!.role !== "user") start++;
+  return history.slice(start);
+}
+
+/** Models often send null for fields they mean to leave out; treat null as absent. */
+export function dropNulls(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(dropNulls);
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, dropNulls(x)]));
+  }
+  return v;
+}
+
+/** Tool results as the model sees them: expense lists as short lines so they aren't cut off. */
+function forModel(name: string, outcome: ToolOutcome): unknown {
+  if (!outcome.ok || name !== "list_expenses") return outcome;
+  const r = outcome.result as { expenses: ExpenseRow[] } & Record<string, unknown>;
+  return { ok: true, result: { ...r, expenses: r.expenses.map(rowLine) } };
 }

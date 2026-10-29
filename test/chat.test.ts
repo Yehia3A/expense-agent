@@ -223,7 +223,7 @@ describe("/chat tool-calling loop", () => {
     expect(await rows()).toHaveLength(0);
   });
 
-  it("passes the short history so follow-up answers have context", async () => {
+  it("passes the chat history so follow-up answers have context", async () => {
     const llm = scriptedLlm([{ content: "ok" }]);
     await runChat(env, TEST_USER,
       {
@@ -236,7 +236,7 @@ describe("/chat tool-calling loop", () => {
       },
       deps(llm),
     );
-    expect(llm.requests[0]!.messages.map((m) => m.role)).toEqual(["system", "user", "assistant", "user"]);
+    expect(llm.requests[0]!.messages.map((m) => m.role)).toEqual(["system", "system", "user", "assistant", "user"]);
   });
 });
 

@@ -6,7 +6,7 @@ const form = $("#chat-form");
 const input = $("#msg");
 const sendBtn = $("#send");
 const monthInput = $("#month");
-const history = []; // last few text turns, sent with each message for follow-ups
+const history = []; // this page's whole chat, sent with each message so follow-ups have context (D48)
 
 function scrollLog() {
   logEl.scrollTop = logEl.scrollHeight;
@@ -31,10 +31,13 @@ export async function sendChat(message) {
   sendBtn.disabled = true;
   const request_id = newId();
   try {
-    const res = await api("/chat", { method: "POST", body: { message, request_id, history: history.slice(-10) } });
+    const res = await api("/chat", { method: "POST", body: { message, request_id, history: history.slice(-100) } });
     typing.remove();
     renderReply(res);
-    history.push({ role: "user", content: message }, { role: "assistant", content: res.reply });
+    // The memo lists what was saved, changed or deleted (with ids), so "make it 250" finds the row.
+    const reply = res.memo ? `${res.reply}
+[${res.memo}]` : res.reply;
+    history.push({ role: "user", content: message.slice(0, 4000) }, { role: "assistant", content: reply.slice(0, 4000) });
     if (res.changed) dataChanged();
     return res;
   } catch (err) {
